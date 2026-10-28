@@ -1,0 +1,173 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+  
+  --color-bg-primary: #0a0a0c;
+  --color-bg-secondary: #121215;
+  --color-bg-tertiary: #18181c;
+  --color-bg-card: rgba(22, 22, 26, 0.72);
+  --color-bg-hover: rgba(32, 32, 38, 0.85);
+  --color-bg-glass: rgba(255, 255, 255, 0.035);
+  
+  --color-border-primary: rgba(255, 255, 255, 0.08);
+  --color-border-hover: rgba(255, 255, 255, 0.16);
+  --color-border-highlight: rgba(255, 255, 255, 0.12);
+  
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #94a3b8;
+  --color-text-tertiary: #64748b;
+  
+  --color-accent: #84cc16;
+  --color-accent-hover: #a3e635;
+  --color-accent-dim: rgba(132, 204, 22, 0.14);
+  --color-accent-glow: rgba(132, 204, 22, 0.28);
+  
+  --color-danger: #f43f5e;
+  --color-warning: #f59e0b;
+  --color-info: #38bdf8;
+  --color-success: #22c55e;
+  
+  --color-discipline: #a855f7;
+  --color-body: #f43f5e;
+  --color-mind: #38bdf8;
+  --color-learning: #f59e0b;
+  --color-nutrition: #22c55e;
+  --color-money: #06b6d4;
+  
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.5rem;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+/* Subtle Apple Health ambient depth */
+body::before {
+  content: '';
+  position: fixed;
+  top: -200px;
+  right: -100px;
+  width: 500px;
+  height: 500px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(132, 204, 22, 0.035) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+[data-theme="light"] {
+  --color-bg-primary: #f8fafc;
+  --color-bg-secondary: #ffffff;
+  --color-bg-tertiary: #f1f5f9;
+  --color-bg-card: rgba(255, 255, 255, 0.85);
+  --color-bg-hover: #f1f5f9;
+  --color-bg-glass: rgba(0, 0, 0, 0.025);
+  --color-border-primary: rgba(0, 0, 0, 0.08);
+  --color-border-hover: rgba(0, 0, 0, 0.16);
+  --color-border-highlight: rgba(0, 0, 0, 0.12);
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #475569;
+  --color-text-tertiary: #94a3b8;
+  --color-accent-dim: rgba(132, 204, 22, 0.12);
+  --color-accent-glow: rgba(132, 204, 22, 0.2);
+}
+
+/* Restrained Liquid Glass Utility Classes */
+.glass-surface {
+  background: var(--color-bg-card);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--color-border-primary);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.07), 0 8px 30px -4px rgba(0, 0, 0, 0.35);
+}
+
+.glass-pill {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+input, textarea, select {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-primary);
+  border-radius: var(--radius-md);
+  padding: 0.65rem 0.9rem;
+  font-size: 0.875rem;
+  outline: none;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  width: 100%;
+}
+
+input:focus, textarea:focus, select:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(132, 204, 22, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='rgba(255,255,255,0.4)'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1rem;
+  padding-right: 2.25rem;
+}
+
+[data-theme="light"] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='rgba(0,0,0,0.4)'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+}
+
+button {
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
