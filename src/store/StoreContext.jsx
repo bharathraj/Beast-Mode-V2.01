@@ -4,17 +4,68 @@ import { defaultExercises, defaultFoods } from '../data/defaults';
 
 const StoreContext = createContext(null);
 
+
 function initState() {
-  const data = loadData();
-  // Seed exercises and foods if empty
-  if (!data.exercises || data.exercises.length === 0) {
+  const loadedData = loadData() || {};
+  const data = { ...loadedData };
+
+  // Ensure collection fields always have the expected array structure.
+  const arrayFields = [
+    'habits',
+    'challenges',
+    'habitCompletions',
+    'workoutSessions',
+    'workoutTemplates',
+    'exercises',
+    'bodyMeasurements',
+    'foods',
+    'mealEntries',
+    'waterEntries',
+    'moodLogs',
+    'sleepLogs',
+    'meditations',
+    'journalEntries',
+    'learningGoals',
+    'learningSessions',
+    'transactions',
+    'budgets',
+    'savingsGoals',
+    'weeklyReviews',
+  ];
+
+  for (const key of arrayFields) {
+    if (!Array.isArray(data[key])) {
+      // Preserve object-based records when possible.
+      data[key] =
+        data[key] && typeof data[key] === 'object'
+          ? Object.values(data[key])
+          : [];
+    }
+  }
+
+  // Ensure required objects exist.
+  data.profile =
+    data.profile && typeof data.profile === 'object'
+      ? data.profile
+      : {};
+
+  data.preferences =
+    data.preferences && typeof data.preferences === 'object'
+      ? data.preferences
+      : {};
+
+  // Seed exercises and foods if empty.
+  if (data.exercises.length === 0) {
     data.exercises = [...defaultExercises];
   }
-  if (!data.foods || data.foods.length === 0) {
+
+  if (data.foods.length === 0) {
     data.foods = [...defaultFoods];
   }
+
   return data;
 }
+
 
 function reducer(state, action) {
   switch (action.type) {
