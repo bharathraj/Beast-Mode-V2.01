@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store/StoreContext';
@@ -44,7 +44,6 @@ import {
   ArrowRight,
   Activity,
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -62,6 +61,93 @@ const categoryConfig = {
   money: { label: 'Money', color: 'var(--color-money)', icon: Wallet },
 };
 
+function WeeklyDisciplineChart({ data, today }) {
+  const [hoveredIdx, setHoveredIdx] = useState(null);
+
+  return (
+    <div
+      role="region"
+      aria-label="Weekly habit completion chart"
+      className="w-full h-[170px] flex flex-col justify-end pt-2 pb-1 select-none"
+    >
+      {/* Bars track container */}
+      <div className="flex-1 flex items-end justify-between gap-2 sm:gap-3 px-1 sm:px-3 pb-2 border-b border-white/[0.06]">
+        {data.map((item, idx) => {
+          const isToday = item.date === today;
+          const isHovered = hoveredIdx === idx;
+          const heightPct = Math.max(8, item.percent);
+
+          return (
+            <div
+              key={item.day + item.date}
+              className="flex-1 flex flex-col items-center justify-end h-full relative group cursor-pointer"
+              onMouseEnter={() => setHoveredIdx(idx)}
+              onMouseLeave={() => setHoveredIdx(null)}
+              onFocus={() => setHoveredIdx(idx)}
+              onBlur={() => setHoveredIdx(null)}
+              tabIndex={0}
+              role="img"
+              aria-label={`${item.day}: ${item.percent}% (${item.completed} of ${item.total} habits)`}
+            >
+              {/* Floating Tooltip */}
+              {isHovered && (
+                <div
+                  role="tooltip"
+                  className="absolute -top-11 z-20 px-2.5 py-1 rounded-xl bg-[var(--color-bg-secondary)]/95 backdrop-blur-xl border border-[var(--color-border-primary)] shadow-[0_8px_24px_rgba(0,0,0,0.6)] text-center pointer-events-none whitespace-nowrap animate-in fade-in zoom-in-95 duration-150"
+                >
+                  <p className="text-[11px] font-bold text-[var(--color-text-primary)]">
+                    {item.percent}% <span className="font-normal text-[var(--color-text-tertiary)]">({item.completed}/{item.total})</span>
+                  </p>
+                  <p className="text-[9px] text-[var(--color-accent)] font-semibold uppercase tracking-wider">
+                    {item.day} {isToday ? '• Today' : ''}
+                  </p>
+                </div>
+              )}
+
+              {/* Bar track and fill */}
+              <div className="w-full max-w-[32px] h-full flex items-end justify-center rounded-xl bg-white/[0.025] hover:bg-white/[0.05] p-0.5 transition-colors">
+                <div
+                  className={`w-full rounded-lg transition-all duration-300 ${
+                    item.percent > 0
+                      ? isToday
+                        ? 'bg-gradient-to-t from-[#65a30d] to-[var(--color-accent)] shadow-[0_0_12px_rgba(132,204,22,0.35)]'
+                        : 'bg-[var(--color-accent)]/85 hover:bg-[var(--color-accent)]'
+                      : 'bg-white/[0.08]'
+                  }`}
+                  style={{
+                    height: `${heightPct}%`,
+                    opacity: item.percent === 0 ? 0.35 : 1,
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* X-Axis Day Labels */}
+      <div className="flex justify-between gap-2 sm:gap-3 px-1 sm:px-3 pt-2">
+        {data.map((item) => {
+          const isToday = item.date === today;
+          return (
+            <div key={item.day} className="flex-1 text-center">
+              <span
+                className={`text-[11px] font-semibold transition-colors ${
+                  isToday
+                    ? 'text-[var(--color-accent)] font-bold'
+                    : 'text-[var(--color-text-tertiary)]'
+                }`}
+              >
+                {item.day}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function HomePage() {
   const { state, dispatch } = useStore();
   const navigate = useNavigate();
@@ -70,6 +156,15 @@ export default function HomePage() {
   const GreetingIcon = greeting.icon;
   const [showReport, setShowReport] = useState(false);
   const [waterToast, setWaterToast] = useState(false);
+  const [hasActiveWorkout, setHasActiveWorkout] = useState(false);
+
+  useEffect(() => {
+    try {
+      setHasActiveWorkout(Boolean(localStorage.getItem('bm90_active_workout')));
+    } catch {
+      setHasActiveWorkout(false);
+    }
+  }, []);
 
   const activeChallenge = useMemo(
     () => state.challenges.find((c) => c.status === 'active'),
@@ -408,36 +503,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          <ResponsiveContainer width="100%" height={170}>
-            <BarChart data={weekData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
-              <XAxis
-                dataKey="day"
-                axisLine={false}
-                tickLine={false}
-                tick={{ fontSize: 11, fill: 'var(--color-text-tertiary)', fontWeight: 500 }}
-              />
-              <YAxis hide domain={[0, 100]} />
-              <Tooltip
-                cursor={{ fill: 'rgba(255, 255, 255, 0.04)' }}
-                contentStyle={{
-                  background: 'rgba(20, 20, 25, 0.95)',
-                  backdropFilter: 'blur(16px)',
-                  border: '1px solid rgba(255, 255, 255, 0.12)',
-                  borderRadius: '16px',
-                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
-                  fontSize: '12px',
-                  color: '#fff',
-                }}
-                formatter={(val) => [`${val}%`, 'Habits Completed']}
-              />
-              <Bar
-                dataKey="percent"
-                fill="var(--color-accent)"
-                radius={[8, 8, 8, 8]}
-                maxBarSize={30}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+          <WeeklyDisciplineChart data={weekData} today={today} />
         </Card>
 
         {/* Quick Actions Grid */}
@@ -459,17 +525,30 @@ export default function HomePage() {
           <div className="grid grid-cols-2 gap-2.5">
             <button
               onClick={() => navigate('/train')}
-              className="flex items-center gap-3 p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.07] hover:border-white/[0.12] transition-all text-left"
+              className={`flex items-center gap-3 p-3 rounded-2xl border transition-all text-left ${
+                hasActiveWorkout
+                  ? 'bg-[var(--color-accent-dim)]/20 border-[var(--color-accent)]/30 hover:border-[var(--color-accent)]/50 shadow-[0_0_16px_rgba(132,204,22,0.1)]'
+                  : 'bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.07] hover:border-white/[0.12]'
+              }`}
             >
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-rose-500/15 border border-rose-500/20 text-rose-400 shrink-0">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                hasActiveWorkout
+                  ? 'bg-[var(--color-accent)]/20 border border-[var(--color-accent)]/40 text-[var(--color-accent)]'
+                  : 'bg-rose-500/15 border border-rose-500/20 text-rose-400'
+              }`}>
                 <Dumbbell size={18} strokeWidth={2} />
               </div>
               <div className="min-w-0">
-                <span className="text-xs sm:text-sm font-bold text-[var(--color-text-primary)] block truncate">
-                  Start Workout
-                </span>
+                <div className="flex items-center gap-1.5">
+                  {hasActiveWorkout && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] animate-pulse" />
+                  )}
+                  <span className="text-xs sm:text-sm font-bold text-[var(--color-text-primary)] block truncate">
+                    {hasActiveWorkout ? 'Resume Workout' : 'Start Workout'}
+                  </span>
+                </div>
                 <span className="text-[10px] text-[var(--color-text-tertiary)] block mt-0.5">
-                  Log training
+                  {hasActiveWorkout ? 'Workout in progress' : 'Log training'}
                 </span>
               </div>
             </button>

@@ -63,7 +63,20 @@ export default function Onboarding() {
       habitIds.push(id);
     });
 
-    // Create challenge
+    // Archive or abandon any existing active challenges to ensure exactly one active challenge remains
+    const existingActive = (state.challenges || []).filter(c => c.status === 'active');
+    existingActive.forEach(prevChallenge => {
+      dispatch({
+        type: 'UPDATE_CHALLENGE',
+        payload: {
+          id: prevChallenge.id,
+          status: 'abandoned',
+          completedAt: new Date().toISOString(),
+        },
+      });
+    });
+
+    // Create exactly one new active challenge with the newly selected mode
     const challenge = createChallenge(selectedMode, habitIds);
     dispatch({ type: 'ADD_CHALLENGE', payload: challenge });
 
@@ -72,7 +85,7 @@ export default function Onboarding() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0c] flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden">
+    <div className="min-h-screen bg-[var(--color-bg-primary)] flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden">
       {/* Background ambient lighting */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-lime-500/10 rounded-full blur-[120px] pointer-events-none" />
 
@@ -89,7 +102,7 @@ export default function Onboarding() {
       </div>
 
       <motion.div
-        className="w-full max-w-xl p-6 sm:p-8 rounded-3xl bg-[#121217]/80 backdrop-blur-2xl border border-white/[0.08] shadow-[0_20px_50px_rgba(0,0,0,0.6),inset_0_1px_0_0_rgba(255,255,255,0.1)] relative z-10"
+        className="w-full max-w-xl p-6 sm:p-8 rounded-3xl bg-[var(--color-bg-secondary)]/95 backdrop-blur-2xl border border-[var(--color-border-primary)] shadow-[0_20px_50px_rgba(0,0,0,0.35),inset_0_1px_0_0_rgba(255,255,255,0.08)] relative z-10"
         key={current}
         initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}

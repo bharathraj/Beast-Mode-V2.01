@@ -42,7 +42,7 @@ export default function BottomNav() {
 
   return (
     <>
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#101014]/90 backdrop-blur-2xl border-t border-white/[0.08] shadow-[0_-8px_32px_rgba(0,0,0,0.6)]">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-bg-secondary)]/95 backdrop-blur-2xl border-t border-[var(--color-border-primary)] shadow-[0_-8px_32px_rgba(0,0,0,0.18)]">
         <div className="flex items-center justify-around px-2 py-2 pb-[max(0.6rem,env(safe-area-inset-bottom))]">
           {mainTabs.map(({ to, label, icon: Icon }) => (
             <NavLink
@@ -102,14 +102,14 @@ export default function BottomNav() {
             />
 
             <motion.div
-              className="relative bg-[#131318]/95 backdrop-blur-2xl border-t border-white/[0.1] rounded-t-3xl shadow-[0_-16px_48px_rgba(0,0,0,0.8),inset_0_1px_0_0_rgba(255,255,255,0.12)] p-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] max-h-[80vh] overflow-y-auto"
+              className="relative bg-[var(--color-bg-secondary)]/98 backdrop-blur-2xl border-t border-[var(--color-border-primary)] rounded-t-3xl shadow-[0_-16px_48px_rgba(0,0,0,0.3)] p-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] max-h-[80vh] overflow-y-auto"
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 350 }}
             >
               {/* Sheet handle */}
-              <div className="w-10 h-1 rounded-full bg-white/20 mx-auto mb-4" />
+              <div className="w-10 h-1 rounded-full bg-[var(--color-border-hover)] mx-auto mb-4" />
 
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-base font-bold text-[var(--color-text-primary)]">
@@ -117,7 +117,7 @@ export default function BottomNav() {
                 </h3>
                 <button
                   onClick={() => setShowMore(false)}
-                  className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center text-[var(--color-text-secondary)]"
+                  className="w-8 h-8 rounded-full bg-[var(--color-bg-hover)] flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
                 >
                   <X size={16} />
                 </button>
@@ -134,7 +134,7 @@ export default function BottomNav() {
                       className={`flex items-center gap-3.5 p-3 rounded-2xl border transition-all ${
                         isActive
                           ? 'bg-[var(--color-accent-dim)] border-[var(--color-accent)]/30 text-[var(--color-accent)]'
-                          : 'bg-white/[0.03] border-white/[0.06] text-[var(--color-text-primary)] hover:bg-white/[0.06]'
+                          : 'bg-[var(--color-bg-card)] border-[var(--color-border-primary)] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'
                       }`}
                     >
                       <div

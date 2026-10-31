@@ -30,7 +30,7 @@ Built with Beastmode 90`;
     <Modal isOpen={isOpen} onClose={onClose} title="Transformation Report" maxWidth="max-w-2xl">
       <div className="space-y-6">
         {/* Hero Banner */}
-        <div className="relative overflow-hidden rounded-2xl p-6 bg-gradient-to-b from-white/[0.06] to-white/[0.02] border border-white/[0.08] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12)] text-center">
+        <div className="relative overflow-hidden rounded-2xl p-6 bg-gradient-to-b from-[var(--color-bg-card)] to-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)] text-center">
           <div className="w-16 h-16 mx-auto mb-3 rounded-2xl bg-lime-500/15 border border-lime-500/30 flex items-center justify-center text-lime-400 shadow-[0_0_24px_rgba(132,204,22,0.25)]">
             <Trophy size={32} />
           </div>
@@ -44,7 +44,7 @@ Built with Beastmode 90`;
             {report.startDate} to {report.endDate} · {report.daysTracked} Days of Dedication
           </p>
 
-          <div className="grid grid-cols-3 gap-2 mt-5 pt-4 border-t border-white/[0.06]">
+          <div className="grid grid-cols-3 gap-2 mt-5 pt-4 border-t border-[var(--color-border-primary)]">
             <div>
               <p className="text-2xl font-black text-lime-400 font-mono">{report.habitRate}%</p>
               <p className="text-[10px] uppercase tracking-wider text-[var(--color-text-tertiary)]">Discipline Rate</p>
@@ -74,7 +74,7 @@ Built with Beastmode 90`;
                   className={`p-3 rounded-xl border transition-all ${
                     ms.achieved
                       ? 'bg-lime-500/[0.08] border-lime-500/30 text-[var(--color-text-primary)] shadow-[inset_0_1px_0_0_rgba(132,204,22,0.1)]'
-                      : 'bg-white/[0.02] border-white/[0.05] opacity-50'
+                      : 'bg-[var(--color-bg-hover)] border-[var(--color-border-primary)] opacity-50'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">

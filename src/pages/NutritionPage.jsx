@@ -111,11 +111,17 @@ export default function NutritionPage() {
     return calculateMacroCaloricDistribution(totals.protein, totals.carbs, totals.fat);
   }, [totals.protein, totals.carbs, totals.fat]);
 
-  // Water total
+  // Water total and entries
   const todayWater = useMemo(() => {
     return (state.waterEntries || [])
       .filter(w => w.date === today)
       .reduce((sum, w) => sum + (Number(w.amount) || 0), 0);
+  }, [state.waterEntries, today]);
+
+  const todayWaterEntries = useMemo(() => {
+    return (state.waterEntries || [])
+      .filter(w => w.date === today)
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   }, [state.waterEntries, today]);
 
   // Initialize target form values when modal opens
@@ -356,6 +362,12 @@ export default function NutritionPage() {
         createdAt: new Date().toISOString(),
       },
     });
+    setWaterAmount('');
+  }
+
+  // Delete individual water entry
+  function handleDeleteWater(id) {
+    dispatch({ type: 'DELETE_WATER_ENTRY', payload: id });
   }
 
   // Save custom food
@@ -687,9 +699,12 @@ export default function NutritionPage() {
           </Card>
 
           <Card className="p-5">
-            <h3 className="font-bold text-sm text-[var(--color-text-primary)] mb-3">Custom Hydration Amount</h3>
+            <label htmlFor="custom-water-input" className="font-bold text-sm text-[var(--color-text-primary)] mb-3 block">
+              Custom Hydration Amount
+            </label>
             <div className="flex gap-2.5">
               <input
+                id="custom-water-input"
                 type="number"
                 value={waterAmount}
                 onChange={e => setWaterAmount(e.target.value)}
@@ -700,6 +715,52 @@ export default function NutritionPage() {
                 Add Water
               </Button>
             </div>
+          </Card>
+
+          {/* Today's Individual Water Logs */}
+          <Card className="p-5">
+            <div className="flex items-center justify-between mb-3 pb-2 border-b border-white/[0.06]">
+              <h3 className="font-bold text-sm text-[var(--color-text-primary)]">
+                Today's Water Entries ({todayWaterEntries.length})
+              </h3>
+            </div>
+            {todayWaterEntries.length === 0 ? (
+              <p className="text-xs text-[var(--color-text-tertiary)] py-4 text-center">
+                No hydration entries logged for today yet. Use quick-add buttons above.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {todayWaterEntries.map(entry => (
+                  <div
+                    key={entry.id}
+                    className="flex items-center justify-between p-3 rounded-xl bg-white/[0.025] border border-white/[0.05]"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-lg bg-sky-500/10 text-sky-400 flex items-center justify-center">
+                        <Droplets size={14} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-[var(--color-text-primary)]">
+                          +{entry.amount} ml
+                        </p>
+                        <p className="text-[10px] text-[var(--color-text-tertiary)] font-mono">
+                          {entry.createdAt ? new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Logged today'}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDeleteWater(entry.id)}
+                      className="text-red-400 hover:text-red-300 hover:bg-red-500/10 p-1.5 h-auto"
+                      aria-label={`Delete ${entry.amount} ml water entry`}
+                    >
+                      <Trash2 size={14} />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
         </div>
       )}
@@ -857,10 +918,11 @@ export default function NutritionPage() {
             {/* Editable Servings & Macros */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+                <label htmlFor="log-meal-servings" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                   Servings
                 </label>
                 <input
+                  id="log-meal-servings"
                   type="number"
                   step="0.25"
                   min="0.1"
@@ -870,10 +932,10 @@ export default function NutritionPage() {
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+                <label htmlFor="log-meal-type" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                   Meal Slot
                 </label>
-                <select value={mealType} onChange={e => setMealType(e.target.value)}>
+                <select id="log-meal-type" value={mealType} onChange={e => setMealType(e.target.value)}>
                   {MEAL_TYPES.map(m => (
                     <option key={m} value={m} className="capitalize">{m}</option>
                   ))}
@@ -887,8 +949,9 @@ export default function NutritionPage() {
               </p>
               <div className="grid grid-cols-4 gap-2">
                 <div>
-                  <label className="text-[10px] text-[var(--color-text-tertiary)] block mb-0.5 font-bold">Calories</label>
+                  <label htmlFor="override-calories" className="text-[10px] text-[var(--color-text-tertiary)] block mb-0.5 font-bold">Calories</label>
                   <input
+                    id="override-calories"
                     type="number"
                     value={overrideCalories}
                     onChange={e => setOverrideCalories(e.target.value)}
@@ -896,8 +959,9 @@ export default function NutritionPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] text-[var(--color-text-tertiary)] block mb-0.5 font-bold">Protein (g)</label>
+                  <label htmlFor="override-protein" className="text-[10px] text-[var(--color-text-tertiary)] block mb-0.5 font-bold">Protein (g)</label>
                   <input
+                    id="override-protein"
                     type="number"
                     step="0.1"
                     value={overrideProtein}
@@ -906,8 +970,9 @@ export default function NutritionPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] text-[var(--color-text-tertiary)] block mb-0.5 font-bold">Carbs (g)</label>
+                  <label htmlFor="override-carbs" className="text-[10px] text-[var(--color-text-tertiary)] block mb-0.5 font-bold">Carbs (g)</label>
                   <input
+                    id="override-carbs"
                     type="number"
                     step="0.1"
                     value={overrideCarbs}
@@ -916,8 +981,9 @@ export default function NutritionPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] text-[var(--color-text-tertiary)] block mb-0.5 font-bold">Fat (g)</label>
+                  <label htmlFor="override-fat" className="text-[10px] text-[var(--color-text-tertiary)] block mb-0.5 font-bold">Fat (g)</label>
                   <input
+                    id="override-fat"
                     type="number"
                     step="0.1"
                     value={overrideFat}
@@ -962,20 +1028,22 @@ export default function NutritionPage() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+                <label htmlFor="edit-meal-name" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                   Food Name
                 </label>
                 <input
+                  id="edit-meal-name"
                   value={editFoodName}
                   onChange={e => setEditFoodName(e.target.value)}
                   placeholder="Food name"
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+                <label htmlFor="edit-meal-serving-desc" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                   Serving Size Description
                 </label>
                 <input
+                  id="edit-meal-serving-desc"
                   value={editServingSize}
                   onChange={e => setEditServingSize(e.target.value)}
                   placeholder="e.g., 1 katori (150g)"
@@ -985,10 +1053,11 @@ export default function NutritionPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+                <label htmlFor="edit-meal-servings" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                   Servings
                 </label>
                 <input
+                  id="edit-meal-servings"
                   type="number"
                   step="0.25"
                   min="0.1"
@@ -998,10 +1067,10 @@ export default function NutritionPage() {
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+                <label htmlFor="edit-meal-type" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                   Meal Slot
                 </label>
-                <select value={editMealType} onChange={e => setEditMealType(e.target.value)}>
+                <select id="edit-meal-type" value={editMealType} onChange={e => setEditMealType(e.target.value)}>
                   {MEAL_TYPES.map(m => (
                     <option key={m} value={m} className="capitalize">{m}</option>
                   ))}
@@ -1011,10 +1080,11 @@ export default function NutritionPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+                <label htmlFor="edit-meal-calories" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                   Base Calories
                 </label>
                 <input
+                  id="edit-meal-calories"
                   type="number"
                   value={editCalories}
                   onChange={e => setEditCalories(e.target.value)}
@@ -1022,10 +1092,11 @@ export default function NutritionPage() {
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+                <label htmlFor="edit-meal-protein" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                   Protein (g)
                 </label>
                 <input
+                  id="edit-meal-protein"
                   type="number"
                   step="0.1"
                   value={editProtein}
@@ -1034,10 +1105,11 @@ export default function NutritionPage() {
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+                <label htmlFor="edit-meal-carbs" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                   Carbs (g)
                 </label>
                 <input
+                  id="edit-meal-carbs"
                   type="number"
                   step="0.1"
                   value={editCarbs}
@@ -1046,10 +1118,11 @@ export default function NutritionPage() {
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+                <label htmlFor="edit-meal-fat" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                   Fat (g)
                 </label>
                 <input
+                  id="edit-meal-fat"
                   type="number"
                   step="0.1"
                   value={editFat}
@@ -1094,10 +1167,11 @@ export default function NutritionPage() {
           </p>
 
           <div>
-            <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+            <label htmlFor="target-calories-input" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
               Daily Target Calories (kcal)
             </label>
             <input
+              id="target-calories-input"
               type="number"
               value={targetCals}
               onChange={e => setTargetCals(e.target.value)}
@@ -1108,10 +1182,11 @@ export default function NutritionPage() {
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+              <label htmlFor="target-protein-input" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                 Protein (g)
               </label>
               <input
+                id="target-protein-input"
                 type="number"
                 value={targetProtein}
                 onChange={e => setTargetProtein(e.target.value)}
@@ -1120,10 +1195,11 @@ export default function NutritionPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+              <label htmlFor="target-carbs-input" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                 Carbs (g)
               </label>
               <input
+                id="target-carbs-input"
                 type="number"
                 value={targetCarbs}
                 onChange={e => setTargetCarbs(e.target.value)}
@@ -1132,10 +1208,11 @@ export default function NutritionPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+              <label htmlFor="target-fat-input" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                 Fat (g)
               </label>
               <input
+                id="target-fat-input"
                 type="number"
                 value={targetFat}
                 onChange={e => setTargetFat(e.target.value)}
@@ -1172,8 +1249,9 @@ export default function NutritionPage() {
       >
         <div className="space-y-3.5">
           <div>
-            <label className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">Food Name</label>
+            <label htmlFor="custom-food-name" className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">Food Name</label>
             <input
+              id="custom-food-name"
               value={customName}
               onChange={e => setCustomName(e.target.value)}
               placeholder="e.g., Mom's Special Dal Tadka"
@@ -1181,8 +1259,9 @@ export default function NutritionPage() {
             />
           </div>
           <div>
-            <label className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">Serving Size</label>
+            <label htmlFor="custom-food-serving" className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">Serving Size</label>
             <input
+              id="custom-food-serving"
               value={customServing}
               onChange={e => setCustomServing(e.target.value)}
               placeholder="e.g., 1 katori (150g)"
@@ -1190,8 +1269,9 @@ export default function NutritionPage() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">Calories (kcal)</label>
+              <label htmlFor="custom-food-cals" className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">Calories (kcal)</label>
               <input
+                id="custom-food-cals"
                 type="number"
                 value={customCals}
                 onChange={e => setCustomCals(e.target.value)}
@@ -1200,8 +1280,9 @@ export default function NutritionPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">Protein (g)</label>
+              <label htmlFor="custom-food-protein" className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">Protein (g)</label>
               <input
+                id="custom-food-protein"
                 type="number"
                 step="0.1"
                 value={customProtein}
@@ -1211,8 +1292,9 @@ export default function NutritionPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">Carbs (g)</label>
+              <label htmlFor="custom-food-carbs" className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">Carbs (g)</label>
               <input
+                id="custom-food-carbs"
                 type="number"
                 step="0.1"
                 value={customCarbs}
@@ -1222,8 +1304,9 @@ export default function NutritionPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">Fat (g)</label>
+              <label htmlFor="custom-food-fat" className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">Fat (g)</label>
               <input
+                id="custom-food-fat"
                 type="number"
                 step="0.1"
                 value={customFat}

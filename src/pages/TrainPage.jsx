@@ -15,7 +15,7 @@ import {
   ChevronRight, Trash2, Trophy, Weight, Timer,
   TrendingUp, RefreshCw, ExternalLink, Info, Filter,
   ChevronLeft, Image as ImageIcon, Check, Sparkles,
-  RotateCcw, Activity
+  RotateCcw, Activity, Minimize2, Edit3, BookmarkPlus
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -50,12 +50,64 @@ function ExerciseThumbnail({ src, alt, size = 'md' }) {
   );
 }
 
+export const ACTIVE_WORKOUT_KEY = 'bm90_active_workout';
+
+export function loadSavedWorkoutSession() {
+  try {
+    const storage = typeof localStorage !== 'undefined' ? localStorage : (typeof window !== 'undefined' ? window.localStorage : null);
+    if (!storage) return null;
+    const raw = storage.getItem(ACTIVE_WORKOUT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      Array.isArray(parsed.exercises) &&
+      parsed.status === 'active'
+    ) {
+      return parsed;
+    }
+  } catch (err) {
+    console.error('Failed to load active workout session:', err);
+  }
+  return null;
+}
+
+export function saveActiveWorkoutSession(session) {
+  try {
+    const storage = typeof localStorage !== 'undefined' ? localStorage : (typeof window !== 'undefined' ? window.localStorage : null);
+    if (!storage) return;
+    if (session) {
+      storage.setItem(ACTIVE_WORKOUT_KEY, JSON.stringify(session));
+    } else {
+      storage.removeItem(ACTIVE_WORKOUT_KEY);
+    }
+  } catch (err) {
+    console.error('Failed to save active workout session:', err);
+  }
+}
+
+export const DEFAULT_TEMPLATE_IDS = ['wt_push', 'wt_pull', 'wt_legs', 'wt_full_body'];
+
 export default function TrainPage() {
   const { state, dispatch } = useStore();
   const [tab, setTab] = useState('workout');
   const [showStart, setShowStart] = useState(false);
-  const [activeSession, setActiveSession] = useState(null);
+  const [activeSession, setActiveSession] = useState(() => loadSavedWorkoutSession());
+  const [isWorkoutMinimized, setIsWorkoutMinimized] = useState(false);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const [pendingTemplateToStart, setPendingTemplateToStart] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
+
+  // Routine management state
+  const [showRoutineModal, setShowRoutineModal] = useState(false);
+  const [editingRoutineId, setEditingRoutineId] = useState(null);
+  const [routineName, setRoutineName] = useState('');
+  const [routineDescription, setRoutineDescription] = useState('');
+  const [routineExercises, setRoutineExercises] = useState([]);
+  const [showRoutineExPicker, setShowRoutineExPicker] = useState(false);
+  const [routineToDelete, setRoutineToDelete] = useState(null);
+  const [showDeleteRoutineConfirm, setShowDeleteRoutineConfirm] = useState(false);
 
   // Exercise library & wger state
   const [exerciseSearch, setExerciseSearch] = useState('');
@@ -81,12 +133,15 @@ export default function TrainPage() {
 
   // Body measurements
   const [showBodyForm, setShowBodyForm] = useState(false);
+  const [editingMeasurement, setEditingMeasurement] = useState(null);
+  const [bodyDate, setBodyDate] = useState(todayStr());
   const [bodyWeight, setBodyWeight] = useState('');
   const [bodyWaist, setBodyWaist] = useState('');
 
   // Rest timer
   const [restTimer, setRestTimer] = useState(0);
   const [restRunning, setRestRunning] = useState(false);
+  const [restAlert, setRestAlert] = useState(false);
   const timerRef = useRef(null);
 
   const localExercises = state.exercises || [];
@@ -101,6 +156,11 @@ export default function TrainPage() {
   useEffect(() => {
     setDetailImgError(false);
   }, [selectedExerciseDetail]);
+
+  // Synchronize active workout session state to localStorage key
+  useEffect(() => {
+    saveActiveWorkoutSession(activeSession);
+  }, [activeSession]);
 
   // Fetch from wger API whenever search, category, muscle, equipment, page, or retry trigger changes
   useEffect(() => {
@@ -172,6 +232,38 @@ export default function TrainPage() {
       }));
   }, [state.workoutSessions]);
 
+  function triggerRestCompletionAlert() {
+    setRestAlert(true);
+    try {
+      if (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.35);
+      }
+    } catch {
+      // AudioContext policy
+    }
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate([200, 100, 200]);
+      }
+    } catch {
+      // ignore
+    }
+
+    setTimeout(() => setRestAlert(false), 4000);
+  }
+
   // Rest timer ticker
   useEffect(() => {
     if (restRunning && restTimer > 0) {
@@ -179,6 +271,7 @@ export default function TrainPage() {
         setRestTimer(t => {
           if (t <= 1) {
             setRestRunning(false);
+            triggerRestCompletionAlert();
             return 0;
           }
           return t - 1;
@@ -189,6 +282,14 @@ export default function TrainPage() {
   }, [restRunning, restTimer]);
 
   function startWorkout(template) {
+    if (activeSession) {
+      setPendingTemplateToStart(template || { name: 'Quick Workout' });
+      return;
+    }
+    initNewWorkoutSession(template);
+  }
+
+  function initNewWorkoutSession(template) {
     const session = {
       id: generateId(),
       templateId: template?.id || null,
@@ -204,8 +305,11 @@ export default function TrainPage() {
       notes: '',
       status: 'active',
     };
+    saveActiveWorkoutSession(session);
     setActiveSession(session);
+    setIsWorkoutMinimized(false);
     setShowStart(false);
+    setPendingTemplateToStart(null);
   }
 
   function addExerciseToSession(ex) {
@@ -264,11 +368,131 @@ export default function TrainPage() {
       status: 'completed',
     };
     dispatch({ type: 'ADD_WORKOUT_SESSION', payload: completed });
+    saveActiveWorkoutSession(null);
     setActiveSession(null);
+    setIsWorkoutMinimized(false);
   }
 
   function discardWorkout() {
+    setShowDiscardConfirm(true);
+  }
+
+  function confirmDiscardWorkout() {
+    saveActiveWorkoutSession(null);
     setActiveSession(null);
+    setShowDiscardConfirm(false);
+    setIsWorkoutMinimized(false);
+    setPendingTemplateToStart(null);
+  }
+
+  // --- Routine & Template Management Handlers ---
+  function openCreateRoutine() {
+    setEditingRoutineId(null);
+    setRoutineName('');
+    setRoutineDescription('');
+    setRoutineExercises([]);
+    setShowRoutineModal(true);
+  }
+
+  function openEditRoutine(template) {
+    setEditingRoutineId(template.id);
+    setRoutineName(template.name || '');
+    setRoutineDescription(template.description || '');
+    setRoutineExercises(
+      (template.exercises || []).map(te => ({
+        exerciseId: te.exerciseId,
+        exerciseName: te.exerciseName || getExerciseName(te.exerciseId),
+        sets: te.sets || 3,
+        reps: te.reps || 10,
+      }))
+    );
+    setShowRoutineModal(true);
+  }
+
+  function addExerciseToRoutine(ex) {
+    setRoutineExercises(prev => [
+      ...prev,
+      {
+        exerciseId: ex.id,
+        exerciseName: ex.name,
+        sets: 3,
+        reps: 10,
+      },
+    ]);
+    setShowRoutineExPicker(false);
+  }
+
+  function removeExerciseFromRoutine(idx) {
+    setRoutineExercises(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  function updateRoutineExercise(idx, field, value) {
+    setRoutineExercises(prev => {
+      const copy = [...prev];
+      copy[idx] = { ...copy[idx], [field]: value };
+      return copy;
+    });
+  }
+
+  function handleSaveRoutine() {
+    if (!routineName.trim() || routineExercises.length === 0) return;
+    const routineId = editingRoutineId || `routine_${generateId()}`;
+    const payload = {
+      id: routineId,
+      name: routineName.trim(),
+      description: routineDescription.trim(),
+      exercises: routineExercises.map(re => ({
+        exerciseId: re.exerciseId,
+        exerciseName: re.exerciseName || getExerciseName(re.exerciseId),
+        sets: Math.max(1, parseInt(re.sets, 10) || 3),
+        reps: typeof re.reps === 'string' ? (parseInt(re.reps, 10) || re.reps || 10) : (re.reps || 10),
+      })),
+      isCustom: !DEFAULT_TEMPLATE_IDS.includes(routineId),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const alreadyInStore = (state.workoutTemplates || []).some(t => t.id === routineId);
+    if (alreadyInStore) {
+      dispatch({ type: 'UPDATE_WORKOUT_TEMPLATE', payload });
+    } else {
+      dispatch({ type: 'ADD_WORKOUT_TEMPLATE', payload });
+    }
+    setShowRoutineModal(false);
+  }
+
+  function confirmDeleteRoutine() {
+    if (!routineToDelete) return;
+    if (DEFAULT_TEMPLATE_IDS.includes(routineToDelete.id)) {
+      setRoutineToDelete(null);
+      setShowDeleteRoutineConfirm(false);
+      return;
+    }
+    dispatch({ type: 'DELETE_WORKOUT_TEMPLATE', payload: routineToDelete.id });
+    setRoutineToDelete(null);
+    setShowDeleteRoutineConfirm(false);
+  }
+
+  function handleSaveSessionAsRoutine(session) {
+    if (!session) return;
+    setEditingRoutineId(null);
+    setRoutineName(`${session.name} Routine`);
+    setRoutineDescription(`Routine saved from workout on ${session.date}`);
+    setRoutineExercises(
+      (session.exercises || []).map(ex => {
+        const validSets = (ex.sets || []).filter(s => s.reps);
+        const avgReps = validSets.length > 0
+          ? Math.round(validSets.reduce((acc, s) => acc + (parseInt(s.reps, 10) || 0), 0) / validSets.length)
+          : 10;
+        return {
+          exerciseId: ex.exerciseId,
+          exerciseName: ex.exerciseName || getExerciseName(ex.exerciseId),
+          sets: Math.max(1, ex.sets?.length || 3),
+          reps: avgReps || 10,
+        };
+      })
+    );
+    setSelectedSession(null);
+    setShowRoutineModal(true);
   }
 
   function getExerciseName(id) {
@@ -279,19 +503,61 @@ export default function TrainPage() {
     return id.replace(/^(ex_|wger_)/, '').replace(/_/g, ' ');
   }
 
+  function openAddBodyMeasurement() {
+    setEditingMeasurement(null);
+    setBodyWeight('');
+    setBodyWaist('');
+    setBodyDate(todayStr());
+    setShowBodyForm(true);
+  }
+
+  function openEditBodyMeasurement(m) {
+    setEditingMeasurement(m);
+    setBodyWeight(m.weight !== null && m.weight !== undefined ? String(m.weight) : '');
+    setBodyWaist(m.waist !== null && m.waist !== undefined ? String(m.waist) : '');
+    setBodyDate(m.date || todayStr());
+    setShowBodyForm(true);
+  }
+
+  function deleteBodyMeasurement(id) {
+    if (window.confirm('Are you sure you want to delete this body measurement?')) {
+      dispatch({ type: 'DELETE_BODY_MEASUREMENT', payload: id });
+    }
+  }
+
   function saveBodyMeasurement() {
     if (!bodyWeight && !bodyWaist) return;
-    dispatch({
-      type: 'ADD_BODY_MEASUREMENT',
-      payload: {
-        id: generateId(),
-        date: todayStr(),
-        weight: bodyWeight ? parseFloat(bodyWeight) : null,
-        waist: bodyWaist ? parseFloat(bodyWaist) : null,
-        unit: state.preferences.units === 'imperial' ? 'lb' : 'kg',
-        createdAt: new Date().toISOString(),
-      },
-    });
+    const weightNum = bodyWeight ? parseFloat(bodyWeight) : null;
+    const waistNum = bodyWaist ? parseFloat(bodyWaist) : null;
+    const unit = state.preferences.units === 'imperial' ? 'lb' : 'kg';
+
+    if (editingMeasurement) {
+      dispatch({
+        type: 'UPDATE_BODY_MEASUREMENT',
+        payload: {
+          ...editingMeasurement,
+          date: bodyDate || editingMeasurement.date,
+          weight: weightNum,
+          waist: waistNum,
+          unit: editingMeasurement.unit || unit,
+          updatedAt: new Date().toISOString(),
+        },
+      });
+    } else {
+      dispatch({
+        type: 'ADD_BODY_MEASUREMENT',
+        payload: {
+          id: generateId(),
+          date: bodyDate || todayStr(),
+          weight: weightNum,
+          waist: waistNum,
+          unit,
+          createdAt: new Date().toISOString(),
+        },
+      });
+    }
+
+    setEditingMeasurement(null);
     setBodyWeight('');
     setBodyWaist('');
     setShowBodyForm(false);
@@ -346,7 +612,7 @@ export default function TrainPage() {
   }
 
   // Active workout screen
-  if (activeSession) {
+  if (activeSession && !isWorkoutMinimized) {
     return (
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -362,6 +628,14 @@ export default function TrainPage() {
             </h1>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setIsWorkoutMinimized(true)}
+              title="Minimize to browse workouts or exercise library"
+            >
+              <Minimize2 size={14} /> Minimize
+            </Button>
             <Button variant="danger" size="sm" onClick={discardWorkout}>
               Discard
             </Button>
@@ -372,39 +646,49 @@ export default function TrainPage() {
         </div>
 
         {/* Rest Timer Banner */}
-        <Card className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-[var(--color-accent-dim)] border border-[var(--color-accent)]/30 flex items-center justify-center text-[var(--color-accent)] shadow-[0_0_16px_rgba(132,204,22,0.2)]">
-              <Timer size={24} />
+        <Card className="flex flex-col gap-3 p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-[var(--color-accent-dim)] border border-[var(--color-accent)]/30 flex items-center justify-center text-[var(--color-accent)] shadow-[0_0_16px_rgba(132,204,22,0.2)]">
+                <Timer size={24} />
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-tertiary)]">
+                  Rest Timer
+                </p>
+                <p className="text-3xl font-black font-mono tracking-tight text-[var(--color-text-primary)]">
+                  {Math.floor(restTimer / 60)}:{String(restTimer % 60).padStart(2, '0')}
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-tertiary)]">
-                Rest Timer
-              </p>
-              <p className="text-3xl font-black font-mono tracking-tight text-[var(--color-text-primary)]">
-                {Math.floor(restTimer / 60)}:{String(restTimer % 60).padStart(2, '0')}
-              </p>
+            <div className="flex items-center gap-2">
+              {[60, 90, 120].map(t => (
+                <button
+                  key={t}
+                  onClick={() => { setRestTimer(t); setRestRunning(true); setRestAlert(false); }}
+                  className="px-3 py-2 rounded-xl bg-white/[0.04] border border-white/[0.08] text-xs font-bold text-[var(--color-text-primary)] hover:bg-white/[0.08] transition-all"
+                >
+                  +{t}s
+                </button>
+              ))}
+              {restRunning && (
+                <button
+                  onClick={() => { setRestRunning(false); setRestTimer(0); }}
+                  className="px-3.5 py-2 rounded-xl bg-rose-500/15 border border-rose-500/20 text-rose-400 text-xs font-bold hover:bg-rose-500/25 transition-all"
+                >
+                  Stop
+                </button>
+              )}
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {[60, 90, 120].map(t => (
-              <button
-                key={t}
-                onClick={() => { setRestTimer(t); setRestRunning(true); }}
-                className="px-3 py-2 rounded-xl bg-white/[0.04] border border-white/[0.08] text-xs font-bold text-[var(--color-text-primary)] hover:bg-white/[0.08] transition-all"
-              >
-                +{t}s
+          {restAlert && (
+            <div className="p-3 rounded-xl bg-lime-500/15 border border-lime-500/30 text-lime-400 text-xs font-bold flex items-center justify-between">
+              <span>⚡ Rest period complete! Ready for your next set.</span>
+              <button onClick={() => setRestAlert(false)} className="text-[10px] uppercase font-mono underline ml-2">
+                Dismiss
               </button>
-            ))}
-            {restRunning && (
-              <button
-                onClick={() => { setRestRunning(false); setRestTimer(0); }}
-                className="px-3.5 py-2 rounded-xl bg-rose-500/15 border border-rose-500/20 text-rose-400 text-xs font-bold hover:bg-rose-500/25 transition-all"
-              >
-                Stop
-              </button>
-            )}
-          </div>
+            </div>
+          )}
         </Card>
 
         {/* Exercises in Session */}
@@ -489,9 +773,50 @@ export default function TrainPage() {
           ))}
         </div>
 
+        {/* Workout Notes */}
+        <Card className="p-4">
+          <label className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-tertiary)] block mb-2">
+            Session Notes & Reflections
+          </label>
+          <textarea
+            value={activeSession.notes || ''}
+            onChange={e => {
+              const notes = e.target.value;
+              setActiveSession(prev => ({ ...prev, notes }));
+            }}
+            placeholder="Log session notes, intensity, RPE, or reminders..."
+            rows={2}
+            className="w-full px-3.5 py-2.5 rounded-xl bg-white/[0.03] border border-white/[0.08] text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-tertiary)] focus:outline-none focus:border-[var(--color-accent)]/50 resize-none font-sans"
+          />
+        </Card>
+
         <Button variant="secondary" onClick={() => setShowExerciseLib(true)} className="w-full">
           <Plus size={16} /> Add Exercise from Library / wger API
         </Button>
+
+        {/* Discard Confirmation Modal */}
+        {showDiscardConfirm && (
+          <Modal
+            isOpen={showDiscardConfirm}
+            onClose={() => setShowDiscardConfirm(false)}
+            title="Discard Workout?"
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-[var(--color-text-secondary)]">
+                Are you sure you want to discard <strong className="text-[var(--color-text-primary)]">{activeSession.name}</strong>?
+                All logged sets, weights, and reps for this session will be permanently deleted.
+              </p>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <Button variant="secondary" onClick={() => setShowDiscardConfirm(false)}>
+                  Keep Workout
+                </Button>
+                <Button variant="danger" onClick={confirmDiscardWorkout}>
+                  Yes, Discard Workout
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        )}
       </div>
     );
   }
@@ -502,11 +827,58 @@ export default function TrainPage() {
         title="Training & Workouts"
         subtitle="Manage routine templates, exercises via wger REST API, and body progression"
         action={
-          <Button onClick={() => setShowStart(true)} size="sm">
-            <Play size={16} className="fill-current" /> Start Workout
-          </Button>
+          activeSession ? (
+            <Button onClick={() => setIsWorkoutMinimized(false)} size="sm">
+              <Play size={16} className="fill-current" /> Resume Workout
+            </Button>
+          ) : (
+            <Button onClick={() => setShowStart(true)} size="sm">
+              <Play size={16} className="fill-current" /> Start Workout
+            </Button>
+          )
         }
       />
+
+      {/* Active Workout In-Progress Banner */}
+      {activeSession && (
+        <Card className="mb-6 p-4.5 bg-gradient-to-r from-[var(--color-accent-dim)]/50 via-[var(--color-accent-dim)]/20 to-transparent border border-[var(--color-accent)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-[0_0_24px_rgba(132,204,22,0.15)]">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-[var(--color-accent)]/20 border border-[var(--color-accent)]/40 flex items-center justify-center text-[var(--color-accent)] shrink-0 animate-pulse shadow-[0_0_16px_rgba(132,204,22,0.25)]">
+              <Dumbbell size={22} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-ping" />
+                <span className="text-[10px] font-black uppercase tracking-wider text-[var(--color-accent)]">
+                  Active Workout in Progress
+                </span>
+                <span className="text-xs text-[var(--color-text-tertiary)]">•</span>
+                <span className="text-xs text-[var(--color-text-secondary)]">
+                  {activeSession.exercises?.length || 0} exercise{activeSession.exercises?.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <h3 className="text-base sm:text-lg font-black text-[var(--color-text-primary)]">
+                {activeSession.name}
+              </h3>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => setShowDiscardConfirm(true)}
+            >
+              Discard
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setIsWorkoutMinimized(false)}
+            >
+              <Play size={14} className="fill-current" /> Resume Workout
+            </Button>
+          </div>
+        </Card>
+      )}
 
       <TabBar
         tabs={[
@@ -565,19 +937,119 @@ export default function TrainPage() {
             </Card>
           )}
 
-          {sessions.length === 0 ? (
-            <EmptyState
-              icon={Dumbbell}
-              title="No workouts recorded yet"
-              description="Start a quick session or select a template to log sets, reps, and track your training volume."
-              action={
-                <Button onClick={() => setShowStart(true)} size="sm">
-                  <Play size={16} className="fill-current" /> Start First Workout
-                </Button>
-              }
-            />
-          ) : (
-            <div className="space-y-3">
+          {/* Workout Routines & Templates Section */}
+          <Card className="p-4 sm:p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-[var(--color-accent-dim)] border border-[var(--color-accent)]/30 flex items-center justify-center text-[var(--color-accent)]">
+                  <Dumbbell size={16} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-[var(--color-text-primary)]">
+                    Workout Routines & Splits
+                  </h3>
+                  <p className="text-xs text-[var(--color-text-tertiary)]">
+                    {allTemplates.length} routines available ({defaultWorkoutTemplates.length} default presets)
+                  </p>
+                </div>
+              </div>
+              <Button size="sm" onClick={openCreateRoutine}>
+                <Plus size={14} /> Create Routine
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {allTemplates.map(t => {
+                const isDefault = DEFAULT_TEMPLATE_IDS.includes(t.id);
+                return (
+                  <div
+                    key={t.id}
+                    className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/[0.06] flex flex-col justify-between gap-3 hover:border-white/[0.12] transition-all"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <h4 className="font-bold text-sm text-[var(--color-text-primary)] truncate">
+                            {t.name}
+                          </h4>
+                          {isDefault ? (
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-white/[0.06] text-[var(--color-text-tertiary)] shrink-0">
+                              Default
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-[var(--color-accent-dim)] text-[var(--color-accent)] border border-[var(--color-accent)]/30 shrink-0">
+                              Custom
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => openEditRoutine(t)}
+                            title="Edit Routine"
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:bg-white/[0.06] transition-colors"
+                          >
+                            <Edit3 size={13} />
+                          </button>
+                          {!isDefault && (
+                            <button
+                              onClick={() => {
+                                setRoutineToDelete(t);
+                                setShowDeleteRoutineConfirm(true);
+                              }}
+                              title="Delete Routine"
+                              className="w-7 h-7 rounded-lg flex items-center justify-center text-[var(--color-text-tertiary)] hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-xs text-[var(--color-text-secondary)] line-clamp-2 mb-2">
+                        {t.description || `${t.exercises?.length || 0} exercises target routine`}
+                      </p>
+                      <div className="flex flex-wrap gap-1 text-[11px] text-[var(--color-text-tertiary)]">
+                        <span>{t.exercises?.length || 0} exercises</span>
+                        <span>•</span>
+                        <span>
+                          {(t.exercises || []).reduce((acc, ex) => acc + (parseInt(ex.sets, 10) || 3), 0)} total sets
+                        </span>
+                      </div>
+                    </div>
+
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => startWorkout(t)}
+                      className="w-full text-xs font-bold"
+                    >
+                      <Play size={12} className="fill-current text-[var(--color-accent)]" /> Start Routine
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
+          {/* Past Workout Sessions */}
+          <div>
+            <div className="flex items-center justify-between mb-3 px-1">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-tertiary)]">
+                Workout History ({sessions.length})
+              </h3>
+            </div>
+            {sessions.length === 0 ? (
+              <EmptyState
+                icon={Dumbbell}
+                title="No workouts recorded yet"
+                description="Start a quick session or select a routine above to log sets, reps, and track your training volume."
+                action={
+                  <Button onClick={() => setShowStart(true)} size="sm">
+                    <Play size={16} className="fill-current" /> Start First Workout
+                  </Button>
+                }
+              />
+            ) : (
+              <div className="space-y-3">
               {sessions.map(s => (
                 <Card
                   key={s.id}
@@ -607,7 +1079,8 @@ export default function TrainPage() {
             </div>
           )}
         </div>
-      )}
+      </div>
+    )}
 
       {tab === 'exercises' && (
         <div className="space-y-5">
@@ -816,7 +1289,7 @@ export default function TrainPage() {
 
       {tab === 'body' && (
         <div className="space-y-4">
-          <Button onClick={() => setShowBodyForm(true)} size="sm">
+          <Button onClick={openAddBodyMeasurement} size="sm">
             <Plus size={16} /> Add Measurement
           </Button>
 
@@ -826,7 +1299,7 @@ export default function TrainPage() {
               title="No body measurements logged"
               description="Track your body weight and waist circumference over the 90 days to visualize your physical transformation."
               action={
-                <Button size="sm" onClick={() => setShowBodyForm(true)}>
+                <Button size="sm" onClick={openAddBodyMeasurement}>
                   <Plus size={16} /> Log Initial Weight
                 </Button>
               }
@@ -842,6 +1315,24 @@ export default function TrainPage() {
                   <div className="flex items-center gap-2">
                     {m.weight && <Badge>{m.weight} {m.unit || 'kg'}</Badge>}
                     {m.waist && <Badge color="var(--color-info)">{m.waist} cm waist</Badge>}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openEditBodyMeasurement(m)}
+                      className="p-1.5 h-auto text-[var(--color-text-secondary)] hover:text-white"
+                      aria-label={`Edit measurement for ${m.date}`}
+                    >
+                      <Edit3 size={14} />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => deleteBodyMeasurement(m.id)}
+                      className="p-1.5 h-auto text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
+                      aria-label={`Delete measurement for ${m.date}`}
+                    >
+                      <Trash2 size={14} />
+                    </Button>
                   </div>
                 </Card>
               ))}
@@ -890,6 +1381,20 @@ export default function TrainPage() {
               ))}
             </>
           )}
+
+          <div className="pt-2 border-t border-white/[0.08]">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setShowStart(false);
+                openCreateRoutine();
+              }}
+              className="w-full text-xs text-[var(--color-accent)] font-semibold justify-center"
+            >
+              <Plus size={14} /> Create New Routine
+            </Button>
+          </div>
         </div>
       </Modal>
 
@@ -1034,10 +1539,11 @@ export default function TrainPage() {
       >
         <div className="space-y-3.5">
           <div>
-            <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+            <label htmlFor="custom-exercise-name" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
               Exercise Name
             </label>
             <input
+              id="custom-exercise-name"
               value={customExName}
               onChange={e => setCustomExName(e.target.value)}
               placeholder="e.g., Landmine Press"
@@ -1046,10 +1552,10 @@ export default function TrainPage() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+              <label htmlFor="custom-exercise-category" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                 Category
               </label>
-              <select value={customExCategory} onChange={e => setCustomExCategory(e.target.value)}>
+              <select id="custom-exercise-category" value={customExCategory} onChange={e => setCustomExCategory(e.target.value)}>
                 <option value="chest">Chest</option>
                 <option value="back">Back</option>
                 <option value="shoulders">Shoulders</option>
@@ -1060,10 +1566,10 @@ export default function TrainPage() {
               </select>
             </div>
             <div>
-              <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+              <label htmlFor="custom-exercise-equipment" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
                 Equipment
               </label>
-              <select value={customExEquipment} onChange={e => setCustomExEquipment(e.target.value)}>
+              <select id="custom-exercise-equipment" value={customExEquipment} onChange={e => setCustomExEquipment(e.target.value)}>
                 <option value="barbell">Barbell</option>
                 <option value="dumbbell">Dumbbell</option>
                 <option value="bodyweight">Bodyweight</option>
@@ -1074,20 +1580,22 @@ export default function TrainPage() {
             </div>
           </div>
           <div>
-            <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+            <label htmlFor="custom-exercise-muscles" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
               Target Muscles (comma separated)
             </label>
             <input
+              id="custom-exercise-muscles"
               value={customExMuscles}
               onChange={e => setCustomExMuscles(e.target.value)}
               placeholder="e.g., upper chest, triceps, anterior deltoid"
             />
           </div>
           <div>
-            <label className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+            <label htmlFor="custom-exercise-instructions" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
               Execution Instructions & Form
             </label>
             <textarea
+              id="custom-exercise-instructions"
               value={customExInstructions}
               onChange={e => setCustomExInstructions(e.target.value)}
               rows={3}
@@ -1101,20 +1609,54 @@ export default function TrainPage() {
       </Modal>
 
       {/* Body measurement modal */}
-      <Modal isOpen={showBodyForm} onClose={() => setShowBodyForm(false)} title="Log Measurement">
+      <Modal
+        isOpen={showBodyForm}
+        onClose={() => {
+          setShowBodyForm(false);
+          setEditingMeasurement(null);
+        }}
+        title={editingMeasurement ? 'Edit Body Measurement' : 'Log Body Measurement'}
+      >
         <div className="space-y-4">
           <div>
-            <label className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">
-              Weight ({state.preferences.units === 'imperial' ? 'lb' : 'kg'})
+            <label htmlFor="body-measurement-date" className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">
+              Measurement Date
             </label>
-            <input type="number" step="0.1" value={bodyWeight} onChange={e => setBodyWeight(e.target.value)} placeholder="e.g., 75" />
+            <input
+              id="body-measurement-date"
+              type="date"
+              value={bodyDate}
+              onChange={e => setBodyDate(e.target.value)}
+            />
           </div>
           <div>
-            <label className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">Waist (cm)</label>
-            <input type="number" step="0.1" value={bodyWaist} onChange={e => setBodyWaist(e.target.value)} placeholder="e.g., 82" />
+            <label htmlFor="body-measurement-weight" className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">
+              Weight ({state.preferences.units === 'imperial' ? 'lb' : 'kg'})
+            </label>
+            <input
+              id="body-measurement-weight"
+              type="number"
+              step="0.1"
+              value={bodyWeight}
+              onChange={e => setBodyWeight(e.target.value)}
+              placeholder="e.g., 75"
+            />
+          </div>
+          <div>
+            <label htmlFor="body-measurement-waist" className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">
+              Waist Circumference (cm)
+            </label>
+            <input
+              id="body-measurement-waist"
+              type="number"
+              step="0.1"
+              value={bodyWaist}
+              onChange={e => setBodyWaist(e.target.value)}
+              placeholder="e.g., 82"
+            />
           </div>
           <Button onClick={saveBodyMeasurement} disabled={!bodyWeight && !bodyWaist} className="w-full">
-            Save Measurement
+            {editingMeasurement ? 'Update Measurement' : 'Save Measurement'}
           </Button>
         </div>
       </Modal>
@@ -1161,11 +1703,19 @@ export default function TrainPage() {
               ))}
             </div>
 
-            <div className="pt-2">
+            <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="flex-1"
+                onClick={() => handleSaveSessionAsRoutine(selectedSession)}
+              >
+                <BookmarkPlus size={14} /> Save as Routine
+              </Button>
               <Button
                 variant="danger"
                 size="sm"
-                className="w-full"
+                className="flex-1"
                 onClick={() => {
                   dispatch({ type: 'DELETE_WORKOUT_SESSION', payload: selectedSession.id });
                   setSelectedSession(null);
@@ -1177,6 +1727,225 @@ export default function TrainPage() {
           </div>
         )}
       </Modal>
+
+      {/* Discard Confirmation Modal (when on minimized tab view) */}
+      {showDiscardConfirm && (
+        <Modal
+          isOpen={showDiscardConfirm}
+          onClose={() => setShowDiscardConfirm(false)}
+          title="Discard Workout?"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--color-text-secondary)]">
+              Are you sure you want to discard <strong className="text-[var(--color-text-primary)]">{activeSession?.name}</strong>?
+              All logged sets, weights, and reps for this session will be permanently deleted.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={() => setShowDiscardConfirm(false)}>
+                Keep Workout
+              </Button>
+              <Button variant="danger" onClick={confirmDiscardWorkout}>
+                Yes, Discard Workout
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* MODAL: Routine Creator & Editor */}
+      <Modal
+        isOpen={showRoutineModal}
+        onClose={() => setShowRoutineModal(false)}
+        title={editingRoutineId ? 'Edit Workout Routine' : 'Create Workout Routine'}
+        maxWidth="max-w-2xl"
+      >
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="routine-name-input" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+              Routine Name
+            </label>
+            <input
+              id="routine-name-input"
+              value={routineName}
+              onChange={e => setRoutineName(e.target.value)}
+              placeholder="e.g. Upper Body Hypertrophy, Heavy Leg Day..."
+              className="w-full font-semibold"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="routine-description-input" className="text-xs font-bold text-[var(--color-text-secondary)] block mb-1">
+              Description / Target Split
+            </label>
+            <input
+              id="routine-description-input"
+              value={routineDescription}
+              onChange={e => setRoutineDescription(e.target.value)}
+              placeholder="e.g. Focus on chest, shoulders and lats with moderate rest intervals"
+              className="w-full"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-tertiary)]">
+                Routine Exercises ({routineExercises.length})
+              </label>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowRoutineExPicker(true)}
+                className="text-xs font-semibold text-[var(--color-accent)]"
+              >
+                <Plus size={14} /> Add Exercise
+              </Button>
+            </div>
+
+            {routineExercises.length === 0 ? (
+              <div className="p-6 text-center rounded-2xl bg-white/[0.02] border border-dashed border-white/[0.1] text-xs text-[var(--color-text-tertiary)]">
+                No exercises added yet. Click &quot;Add Exercise&quot; to pick exercises for this routine.
+              </div>
+            ) : (
+              <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                {routineExercises.map((re, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-[var(--color-text-primary)] truncate">
+                        {re.exerciseName || getExerciseName(re.exerciseId)}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-[var(--color-text-tertiary)] font-bold">SETS</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="20"
+                          value={re.sets}
+                          onChange={e => updateRoutineExercise(idx, 'sets', e.target.value)}
+                          className="!w-14 !py-1 text-center font-mono font-semibold"
+                          aria-label={`Target sets for ${re.exerciseName || getExerciseName(re.exerciseId)}`}
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-[var(--color-text-tertiary)] font-bold">REPS</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="100"
+                          value={re.reps}
+                          onChange={e => updateRoutineExercise(idx, 'reps', e.target.value)}
+                          className="!w-16 !py-1 text-center font-mono font-semibold"
+                          aria-label={`Target reps for ${re.exerciseName || getExerciseName(re.exerciseId)}`}
+                        />
+                      </div>
+
+                      <button
+                        onClick={() => removeExerciseFromRoutine(idx)}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center text-[var(--color-text-tertiary)] hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                        title="Remove Exercise"
+                        aria-label={`Remove ${re.exerciseName || getExerciseName(re.exerciseId)} from routine`}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-white/[0.08]">
+            <Button variant="secondary" onClick={() => setShowRoutineModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveRoutine}
+              disabled={!routineName.trim() || routineExercises.length === 0}
+            >
+              Save Routine
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* MODAL: Exercise Picker for Routine Builder */}
+      <Modal
+        isOpen={showRoutineExPicker}
+        onClose={() => setShowRoutineExPicker(false)}
+        title="Add Exercise to Routine"
+        maxWidth="max-w-xl"
+      >
+        <div className="relative mb-3">
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]" />
+          <input
+            value={exerciseSearch}
+            onChange={e => setExerciseSearch(e.target.value)}
+            placeholder="Search exercises to add to routine..."
+            className="!pl-10"
+            autoFocus
+          />
+        </div>
+        <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
+          {wgerData.exercises.map(ex => (
+            <button
+              key={ex.id}
+              onClick={() => addExerciseToRoutine(ex)}
+              className="w-full flex items-center gap-3 p-3 rounded-2xl text-left hover:bg-white/[0.06] transition-colors bg-white/[0.03] border border-white/[0.06]"
+            >
+              <ExerciseThumbnail src={ex.thumbnailUrl || ex.imageUrl} alt={ex.name} size="sm" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-[var(--color-text-primary)] truncate">{ex.name}</p>
+                <p className="text-xs text-[var(--color-text-tertiary)] capitalize mt-0.5">
+                  {ex.categoryName || ex.category} · {ex.equipment}
+                </p>
+              </div>
+              <Plus size={16} className="text-[var(--color-accent)] shrink-0" />
+            </button>
+          ))}
+        </div>
+      </Modal>
+
+      {/* MODAL: Delete Routine Confirmation */}
+      {showDeleteRoutineConfirm && routineToDelete && (
+        <Modal
+          isOpen={showDeleteRoutineConfirm}
+          onClose={() => {
+            setShowDeleteRoutineConfirm(false);
+            setRoutineToDelete(null);
+          }}
+          title="Delete Workout Routine?"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--color-text-secondary)]">
+              Are you sure you want to delete <strong className="text-[var(--color-text-primary)]">{routineToDelete.name}</strong>?
+              This custom template will be permanently removed from your routine library.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowDeleteRoutineConfirm(false);
+                  setRoutineToDelete(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={confirmDeleteRoutine}
+              >
+                Yes, Delete Routine
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

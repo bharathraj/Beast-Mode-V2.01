@@ -121,8 +121,9 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">Full Name</label>
+                <label htmlFor="settings-profile-name" className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">Full Name</label>
                 <input
+                  id="settings-profile-name"
                   value={profile.name || ''}
                   onChange={e => updateProfile('name', e.target.value)}
                   placeholder="Your name"
@@ -130,8 +131,9 @@ export default function SettingsPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">Height</label>
+                  <label htmlFor="settings-profile-height" className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">Height</label>
                   <input
+                    id="settings-profile-height"
                     value={profile.height || ''}
                     onChange={e => updateProfile('height', e.target.value)}
                     placeholder="e.g., 175"
@@ -139,8 +141,9 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">Height Unit</label>
+                  <label htmlFor="settings-profile-height-unit" className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">Height Unit</label>
                   <select
+                    id="settings-profile-height-unit"
                     value={profile.heightUnit || 'cm'}
                     onChange={e => updateProfile('heightUnit', e.target.value)}
                   >
@@ -198,15 +201,15 @@ export default function SettingsPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">Weight & Distance</label>
-                  <select value={pref.units || 'metric'} onChange={e => updatePref('units', e.target.value)}>
+                  <label htmlFor="settings-pref-units" className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">Weight & Distance</label>
+                  <select id="settings-pref-units" value={pref.units || 'metric'} onChange={e => updatePref('units', e.target.value)}>
                     <option value="metric">Metric (kg, km)</option>
                     <option value="imperial">Imperial (lb, mi)</option>
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">First Day of Week</label>
-                  <select value={pref.weekStart || 'monday'} onChange={e => updatePref('weekStart', e.target.value)}>
+                  <label htmlFor="settings-pref-weekstart" className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">First Day of Week</label>
+                  <select id="settings-pref-weekstart" value={pref.weekStart || 'monday'} onChange={e => updatePref('weekStart', e.target.value)}>
                     <option value="monday">Monday</option>
                     <option value="sunday">Sunday</option>
                   </select>

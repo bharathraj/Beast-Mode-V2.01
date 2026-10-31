@@ -101,43 +101,61 @@ export function isHabitScheduledForDate(habit, date) {
   return true;
 }
 
-export function getStreak(habitId, completions) {
-  const sorted = completions
-    .filter(c => c.habitId === habitId)
-    .map(c => c.date)
-    .sort()
-    .reverse();
-  if (sorted.length === 0) return { current: 0, longest: 0 };
+export function getStreak(habitId, completions, referenceDate = null) {
+  if (!Array.isArray(completions) || completions.length === 0) {
+    return { current: 0, longest: 0 };
+  }
 
+  // Collect and deduplicate valid completion dates for this habit
+  const datesSet = new Set();
+  for (const c of completions) {
+    if (c && c.habitId === habitId && c.date) {
+      const dStr = typeof c.date === 'string' ? c.date.slice(0, 10) : dateStr(c.date);
+      datesSet.add(dStr);
+    }
+  }
+
+  if (datesSet.size === 0) {
+    return { current: 0, longest: 0 };
+  }
+
+  const today = referenceDate || todayStr();
+  const dYesterday = new Date(today + 'T00:00:00');
+  dYesterday.setDate(dYesterday.getDate() - 1);
+  const yesterday = dateStr(dYesterday);
+
+  // Current streak calculation:
+  // - If completed today, walk backwards starting from today
+  // - If not completed today but completed yesterday, the streak is maintained throughout today; walk backwards from yesterday
+  // - If neither today nor yesterday was completed, a full day was missed and the streak is broken (0)
   let current = 0;
-  let check = todayStr();
-  for (const date of sorted) {
-    if (date === check) {
+  const startCheck = datesSet.has(today) ? today : (datesSet.has(yesterday) ? yesterday : null);
+
+  if (startCheck) {
+    let curr = new Date(startCheck + 'T00:00:00');
+    while (datesSet.has(dateStr(curr))) {
       current++;
-      const d = new Date(check + 'T00:00:00');
-      d.setDate(d.getDate() - 1);
-      check = dateStr(d);
-    } else if (daysBetween(date, check) === 1) {
-      // yesterday wasn't completed yet — check if today is the gap
-      break;
-    } else {
-      break;
+      curr.setDate(curr.getDate() - 1);
     }
   }
 
-  // Longest streak
-  let longest = 0;
-  let streak = 1;
-  const asc = [...new Set(sorted)].sort();
-  for (let i = 1; i < asc.length; i++) {
-    if (daysBetween(asc[i - 1], asc[i]) === 1) {
-      streak++;
-    } else {
-      longest = Math.max(longest, streak);
-      streak = 1;
+  // Longest streak calculation across all unique completion dates
+  const sortedAsc = Array.from(datesSet).sort();
+  let longest = 1;
+  let run = 1;
+
+  for (let i = 1; i < sortedAsc.length; i++) {
+    if (daysBetween(sortedAsc[i - 1], sortedAsc[i]) === 1) {
+      run++;
+    } else if (daysBetween(sortedAsc[i - 1], sortedAsc[i]) > 1) {
+      run = 1;
+    }
+    if (run > longest) {
+      longest = run;
     }
   }
-  longest = Math.max(longest, streak);
+
+  longest = Math.max(longest, current);
 
   return { current, longest };
 }

@@ -38,8 +38,8 @@ function NavItem({ to, label, icon: Icon }) {
       className={({ isActive }) =>
         `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 ${
           isActive
-            ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent)] border border-[var(--color-accent)]/25 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_2px_8px_rgba(132,204,22,0.12)]'
-            : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-white/[0.05] border border-transparent'
+            ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent)] border border-[var(--color-accent)]/30 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08),0_2px_8px_rgba(132,204,22,0.12)]'
+            : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] border border-transparent'
         }`
       }
     >
@@ -51,9 +51,9 @@ function NavItem({ to, label, icon: Icon }) {
 
 export default function Sidebar() {
   return (
-    <aside className="hidden md:flex flex-col w-64 h-screen fixed left-0 top-0 bg-[#0f0f13]/90 backdrop-blur-2xl border-r border-white/[0.08] shadow-[1px_0_24px_rgba(0,0,0,0.5)] z-40">
+    <aside className="hidden md:flex flex-col w-64 h-screen fixed left-0 top-0 bg-[var(--color-bg-secondary)]/95 backdrop-blur-2xl border-r border-[var(--color-border-primary)] shadow-[1px_0_24px_rgba(0,0,0,0.15)] z-40">
       {/* Brand Header */}
-      <div className="px-6 py-5 border-b border-white/[0.08]">
+      <div className="px-6 py-5 border-b border-[var(--color-border-primary)]">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[var(--color-accent)] to-[#65a30d] flex items-center justify-center text-black font-black text-sm shadow-[0_2px_12px_rgba(132,204,22,0.35)] ring-1 ring-white/20">
             B
@@ -81,7 +81,7 @@ export default function Sidebar() {
           <NavItem key={item.to} {...item} />
         ))}
 
-        <div className="my-5 border-t border-white/[0.08]" />
+        <div className="my-5 border-t border-[var(--color-border-primary)]" />
 
         <p className="px-3 mb-2 text-[10px] font-bold tracking-widest uppercase text-[var(--color-text-tertiary)]">
           Growth & System
@@ -92,8 +92,8 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer Status Pill */}
-      <div className="p-4 border-t border-white/[0.08] bg-white/[0.015]">
-        <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+      <div className="p-4 border-t border-[var(--color-border-primary)] bg-[var(--color-bg-glass)]">
+        <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-[var(--color-bg-card)] border border-[var(--color-border-primary)]">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse" />
             <span className="text-xs font-semibold text-[var(--color-text-secondary)]">Active Discipline</span>

@@ -75,24 +75,27 @@ export default function SocialPage() {
     const progress = getChallengeProgress(activeChallenge);
     const scheduledHabits = state.habits.filter(h => !h.archived);
 
-    // Calculate verified completions
+    // Calculate verified completions bounded by start and end date
     const start = activeChallenge.startDate;
-    const end = todayStr();
-    const relevantCompletions = (state.habitCompletions || []).filter(c => c.date >= start && c.date <= end);
+    const today = todayStr();
+    const end = activeChallenge.endDate && activeChallenge.endDate < today ? activeChallenge.endDate : today;
+    const relevantCompletions = (state.habitCompletions || []).filter(
+      c => (!c.challengeId || c.challengeId === activeChallenge.id) && c.date >= start && c.date <= end
+    );
 
     const activeDays = Math.max(1, progress.day);
     const totalScheduledSlots = Math.max(1, scheduledHabits.length * activeDays);
     const verifiedCompletions = relevantCompletions.length;
     const consistency = Math.min(100, Math.round((verifiedCompletions / totalScheduledSlots) * 100));
 
-    // Calculate streak
+    // Calculate streak using challenge-bounded completions
     let maxStreak = 0;
     for (const h of scheduledHabits) {
-      const s = getStreak(h.id, state.habitCompletions);
+      const s = getStreak(h.id, relevantCompletions, end);
       if (s.current > maxStreak) maxStreak = s.current;
     }
 
-    // Workouts completed during active challenge
+    // Workouts completed during active challenge bounded by start and end
     const workouts = (state.workoutSessions || []).filter(w => w.date >= start && w.date <= end).length;
 
     return {
@@ -121,11 +124,11 @@ export default function SocialPage() {
   // Load rankings
   useEffect(() => {
     async function loadRankings() {
-      const data = await getLeaderboardRankings(leaderboardMode, leaderboardScope);
+      const data = await getLeaderboardRankings(leaderboardMode, leaderboardScope, user?.id || 'current_user');
       setRankings(data);
     }
     loadRankings();
-  }, [leaderboardMode, leaderboardScope]);
+  }, [leaderboardMode, leaderboardScope, user]);
 
   // Load friends and groups
   useEffect(() => {
@@ -558,18 +561,59 @@ export default function SocialPage() {
             )}
           </Card>
 
-          {/* Friends List */}
+          {/* Pending Invitations Section */}
+          {friends.some(f => f.status === 'pending') && (
+            <Card className="border-amber-500/20 bg-amber-500/[0.03]">
+              <div className="flex items-center justify-between mb-3 pb-2 border-b border-amber-500/15">
+                <h3 className="font-semibold text-sm text-amber-400">
+                  Pending Invitations ({friends.filter(f => f.status === 'pending').length})
+                </h3>
+              </div>
+              <div className="space-y-2">
+                {friends.filter(f => f.status === 'pending').map(f => (
+                  <div
+                    key={f.id}
+                    className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-amber-500/10"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center text-xs font-bold">
+                        {f.friendName?.[0] || 'P'}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-xs text-[var(--color-text-primary)]">
+                          {f.friendName || f.friendEmail}
+                        </p>
+                        <p className="text-[10px] text-amber-400/80">Pending confirmation</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <Button size="sm" variant="secondary" onClick={() => handleRespondInvite(f.id, true)}>
+                        Accept
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => handleRespondInvite(f.id, false)}>
+                        Decline
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* Accepted Friends List */}
           <Card>
             <div className="flex items-center justify-between mb-3 pb-2 border-b border-white/[0.06]">
-              <h3 className="font-semibold text-sm text-[var(--color-text-primary)]">Your Friends ({friends.length})</h3>
+              <h3 className="font-semibold text-sm text-[var(--color-text-primary)]">
+                Accepted Friends ({friends.filter(f => f.status === 'accepted').length})
+              </h3>
             </div>
-            {friends.length === 0 ? (
+            {friends.filter(f => f.status === 'accepted').length === 0 ? (
               <p className="text-xs text-[var(--color-text-tertiary)] py-6 text-center">
-                No friends added yet. Send an invitation above to begin training together.
+                No accepted friends yet. Send an invitation above or accept pending invites to train together.
               </p>
             ) : (
               <div className="space-y-2">
-                {friends.map(f => (
+                {friends.filter(f => f.status === 'accepted').map(f => (
                   <div
                     key={f.id}
                     className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]"
@@ -582,29 +626,39 @@ export default function SocialPage() {
                         <p className="font-semibold text-xs text-[var(--color-text-primary)]">
                           {f.friendName || f.friendEmail}
                         </p>
-                        <p className="text-[10px] text-[var(--color-text-tertiary)] capitalize">
-                          Status: {f.status}
+                        <p className="text-[10px] text-[var(--color-text-tertiary)]">
+                          Connected {f.joinedAt || 'recently'}
                         </p>
                       </div>
                     </div>
-
-                    {f.status === 'pending' ? (
-                      <div className="flex gap-1.5">
-                        <Button size="sm" variant="secondary" onClick={() => handleRespondInvite(f.id, true)}>
-                          Accept
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => handleRespondInvite(f.id, false)}>
-                          Decline
-                        </Button>
-                      </div>
-                    ) : (
-                      <Badge color="var(--color-accent)">Active</Badge>
-                    )}
+                    <Badge color="var(--color-accent)">Accepted Friend</Badge>
                   </div>
                 ))}
               </div>
             )}
           </Card>
+
+          {/* Declined / Inactive Requests (if any) */}
+          {friends.some(f => f.status === 'declined' || f.status === 'rejected') && (
+            <Card className="opacity-75">
+              <div className="flex items-center justify-between mb-3 pb-2 border-b border-white/[0.06]">
+                <h3 className="font-semibold text-xs text-[var(--color-text-secondary)]">
+                  Declined Invitations ({friends.filter(f => f.status === 'declined' || f.status === 'rejected').length})
+                </h3>
+              </div>
+              <div className="space-y-2">
+                {friends.filter(f => f.status === 'declined' || f.status === 'rejected').map(f => (
+                  <div
+                    key={f.id}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.01] border border-white/[0.03]"
+                  >
+                    <p className="text-xs text-[var(--color-text-tertiary)]">{f.friendName || f.friendEmail}</p>
+                    <Badge color="var(--color-text-tertiary)">Declined</Badge>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
         </div>
       )}
 

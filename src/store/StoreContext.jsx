@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
+import { createContext, useContext, useReducer, useEffect, useCallback, useMemo } from 'react';
 import { loadData, saveData, generateId, todayStr } from '../utils/storage';
 import { defaultExercises, defaultFoods } from '../data/defaults';
 
@@ -67,7 +67,7 @@ function initState() {
 }
 
 
-function reducer(state, action) {
+export function reducer(state, action) {
   switch (action.type) {
     // --- Profile & Preferences ---
     case 'SET_PROFILE':
@@ -122,6 +122,18 @@ function reducer(state, action) {
     // --- Body Measurements ---
     case 'ADD_BODY_MEASUREMENT':
       return { ...state, bodyMeasurements: [...state.bodyMeasurements, action.payload] };
+    case 'UPDATE_BODY_MEASUREMENT':
+      return {
+        ...state,
+        bodyMeasurements: state.bodyMeasurements.map(m =>
+          m.id === action.payload.id ? { ...m, ...action.payload } : m
+        ),
+      };
+    case 'DELETE_BODY_MEASUREMENT':
+      return {
+        ...state,
+        bodyMeasurements: state.bodyMeasurements.filter(m => m.id !== action.payload),
+      };
 
     // --- Foods ---
     case 'ADD_FOOD':
@@ -162,12 +174,46 @@ function reducer(state, action) {
       return { ...state, waterEntries: state.waterEntries.filter(w => w.id !== action.payload) };
 
     // --- Mood ---
-    case 'ADD_MOOD_LOG':
-      return { ...state, moodLogs: [...state.moodLogs, action.payload] };
+    case 'ADD_MOOD_LOG': {
+      const exists = state.moodLogs.some(m => m.date === action.payload.date);
+      const moodLogs = exists
+        ? state.moodLogs.map(m => m.date === action.payload.date ? { ...m, ...action.payload } : m)
+        : [...state.moodLogs, action.payload];
+      return { ...state, moodLogs };
+    }
+    case 'UPDATE_MOOD_LOG':
+      return {
+        ...state,
+        moodLogs: state.moodLogs.map(m =>
+          m.id === action.payload.id || m.date === action.payload.date ? { ...m, ...action.payload } : m
+        ),
+      };
+    case 'DELETE_MOOD_LOG':
+      return {
+        ...state,
+        moodLogs: state.moodLogs.filter(m => m.id !== action.payload && m.date !== action.payload),
+      };
 
     // --- Sleep ---
-    case 'ADD_SLEEP_LOG':
-      return { ...state, sleepLogs: [...state.sleepLogs, action.payload] };
+    case 'ADD_SLEEP_LOG': {
+      const exists = state.sleepLogs.some(s => s.date === action.payload.date);
+      const sleepLogs = exists
+        ? state.sleepLogs.map(s => s.date === action.payload.date ? { ...s, ...action.payload } : s)
+        : [...state.sleepLogs, action.payload];
+      return { ...state, sleepLogs };
+    }
+    case 'UPDATE_SLEEP_LOG':
+      return {
+        ...state,
+        sleepLogs: state.sleepLogs.map(s =>
+          s.id === action.payload.id || s.date === action.payload.date ? { ...s, ...action.payload } : s
+        ),
+      };
+    case 'DELETE_SLEEP_LOG':
+      return {
+        ...state,
+        sleepLogs: state.sleepLogs.filter(s => s.id !== action.payload && s.date !== action.payload),
+      };
 
     // --- Meditation ---
     case 'ADD_MEDITATION':
@@ -208,10 +254,31 @@ function reducer(state, action) {
       return { ...state, savingsGoals: [...state.savingsGoals, action.payload] };
     case 'UPDATE_SAVINGS_GOAL':
       return { ...state, savingsGoals: state.savingsGoals.map(g => g.id === action.payload.id ? { ...g, ...action.payload } : g) };
+    case 'DELETE_SAVINGS_GOAL':
+      return { ...state, savingsGoals: state.savingsGoals.filter(g => g.id !== action.payload) };
 
     // --- Weekly Reviews ---
-    case 'ADD_WEEKLY_REVIEW':
-      return { ...state, weeklyReviews: [...state.weeklyReviews, action.payload] };
+    case 'ADD_WEEKLY_REVIEW': {
+      const exists = state.weeklyReviews.some(r => r.weekStart === action.payload.weekStart);
+      const weeklyReviews = exists
+        ? state.weeklyReviews.map(r => r.weekStart === action.payload.weekStart ? { ...r, ...action.payload } : r)
+        : [...state.weeklyReviews, action.payload];
+      return { ...state, weeklyReviews };
+    }
+    case 'UPDATE_WEEKLY_REVIEW':
+      return {
+        ...state,
+        weeklyReviews: state.weeklyReviews.map(r =>
+          r.id === action.payload.id || r.weekStart === action.payload.weekStart
+            ? { ...r, ...action.payload }
+            : r
+        ),
+      };
+    case 'DELETE_WEEKLY_REVIEW':
+      return {
+        ...state,
+        weeklyReviews: state.weeklyReviews.filter(r => r.id !== action.payload && r.weekStart !== action.payload),
+      };
 
     // --- Bulk ---
     case 'IMPORT_DATA':
@@ -235,8 +302,10 @@ export function StoreProvider({ children }) {
     document.documentElement.setAttribute('data-theme', state.preferences.theme);
   }, [state.preferences.theme]);
 
+  const contextValue = useMemo(() => ({ state, dispatch }), [state]);
+
   return (
-    <StoreContext.Provider value={{ state, dispatch }}>
+    <StoreContext.Provider value={contextValue}>
       {children}
     </StoreContext.Provider>
   );

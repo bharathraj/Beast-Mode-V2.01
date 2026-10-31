@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 
@@ -20,8 +21,8 @@ export function Card({ children, className = '', onClick, hover = true, ...props
 export function GlassCard({ children, className = '', onClick, ...props }) {
   return (
     <div
-      className={`relative bg-white/[0.035] backdrop-blur-2xl border border-white/[0.08] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_8px_32px_-6px_rgba(0,0,0,0.5)] rounded-2xl p-4 sm:p-5 transition-all duration-300 ${
-        onClick ? 'cursor-pointer hover:border-white/[0.18] hover:bg-white/[0.05] active:scale-[0.99]' : ''
+      className={`relative bg-[var(--color-bg-card)] backdrop-blur-2xl border border-[var(--color-border-primary)] shadow-[0_8px_32px_-6px_rgba(0,0,0,0.2)] rounded-2xl p-4 sm:p-5 transition-all duration-300 ${
+        onClick ? 'cursor-pointer hover:border-[var(--color-border-hover)] hover:bg-[var(--color-bg-hover)] active:scale-[0.99]' : ''
       } ${className}`}
       onClick={onClick}
       {...props}
@@ -46,9 +47,9 @@ export function Button({
     primary:
       'bg-[var(--color-accent)] text-black hover:bg-[var(--color-accent-hover)] shadow-[0_2px_12px_rgba(132,204,22,0.25)] hover:shadow-[0_4px_20px_rgba(132,204,22,0.38)] active:scale-[0.97]',
     secondary:
-      'bg-white/[0.05] backdrop-blur-md text-[var(--color-text-primary)] border border-white/[0.09] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)] hover:bg-white/[0.09] hover:border-white/[0.18] active:scale-[0.97]',
+      'bg-[var(--color-bg-hover)] backdrop-blur-md text-[var(--color-text-primary)] border border-[var(--color-border-primary)] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] hover:bg-[var(--color-bg-tertiary)] hover:border-[var(--color-border-hover)] active:scale-[0.97]',
     ghost:
-      'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-white/[0.06] active:scale-[0.97]',
+      'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] active:scale-[0.97]',
     danger:
       'bg-rose-500/15 text-rose-400 border border-rose-500/20 hover:bg-rose-500/25 active:scale-[0.97]',
   };
@@ -73,6 +74,87 @@ export function Button({
 }
 
 export function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-lg' }) {
+  const modalRef = useRef(null);
+  const previousActiveElementRef = useRef(null);
+  const titleId = useRef(`modal-title-${Math.random().toString(36).substring(2, 9)}`).current;
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // 1. Save currently focused element for focus restoration
+    if (typeof document !== 'undefined') {
+      previousActiveElementRef.current = document.activeElement;
+    }
+
+    // 2. Focus first focusable element inside modal after open
+    const focusTimer = setTimeout(() => {
+      if (modalRef.current) {
+        const focusable = modalRef.current.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length > 0) {
+          focusable[0].focus();
+        } else {
+          modalRef.current.focus?.();
+        }
+      }
+    }, 50);
+
+    // 3. Handle Escape key and Tab focus trapping
+    function handleKeyDown(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+
+      if (e.key === 'Tab' && modalRef.current) {
+        const focusable = Array.from(
+          modalRef.current.querySelectorAll(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          )
+        ).filter(el => {
+          if (typeof window !== 'undefined' && el instanceof HTMLElement) {
+            return el.offsetParent !== null || el.offsetWidth > 0 || el.offsetHeight > 0;
+          }
+          return true;
+        });
+
+        if (focusable.length === 0) {
+          e.preventDefault();
+          return;
+        }
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first || !modalRef.current.contains(document.activeElement)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last || !modalRef.current.contains(document.activeElement)) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      clearTimeout(focusTimer);
+      window.removeEventListener('keydown', handleKeyDown);
+      // Restore previous focus
+      if (previousActiveElementRef.current && typeof previousActiveElementRef.current.focus === 'function') {
+        previousActiveElementRef.current.focus();
+      }
+    };
+  }, [isOpen, onClose]);
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -92,23 +174,26 @@ export function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-lg' 
 
           {/* Modal floating card */}
           <motion.div
-            className={`relative bg-[#131317]/95 backdrop-blur-2xl border border-white/[0.1] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8),inset_0_1px_0_0_rgba(255,255,255,0.12)] rounded-3xl w-full ${maxWidth} max-h-[88vh] flex flex-col my-auto overflow-hidden`}
+            ref={modalRef}
+            className={`relative bg-[var(--color-bg-secondary)] backdrop-blur-2xl border border-[var(--color-border-primary)] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.08)] rounded-3xl w-full ${maxWidth} max-h-[88vh] flex flex-col my-auto overflow-hidden`}
             initial={{ scale: 0.96, opacity: 0, y: 10 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.96, opacity: 0, y: 10 }}
             transition={{ type: 'spring', damping: 25, stiffness: 350 }}
             role="dialog"
             aria-modal="true"
+            aria-labelledby={titleId}
+            tabIndex={-1}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.08] shrink-0 bg-white/[0.02]">
-              <h2 className="text-base sm:text-lg font-bold tracking-tight text-[var(--color-text-primary)]">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border-primary)] shrink-0 bg-[var(--color-bg-glass)]">
+              <h2 id={titleId} className="text-base sm:text-lg font-bold tracking-tight text-[var(--color-text-primary)]">
                 {title}
               </h2>
               <button
                 onClick={onClose}
                 aria-label="Close dialog"
-                className="w-8 h-8 rounded-full flex items-center justify-center bg-white/[0.05] hover:bg-white/[0.1] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-all"
+                className="w-8 h-8 rounded-full flex items-center justify-center bg-[var(--color-bg-hover)] hover:bg-[var(--color-border-primary)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-all"
               >
                 <X size={16} />
               </button>

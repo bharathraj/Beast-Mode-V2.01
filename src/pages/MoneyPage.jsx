@@ -72,6 +72,7 @@ export default function MoneyPage() {
   const [savingsName, setSavingsName] = useState('');
   const [savingsTarget, setSavingsTarget] = useState('');
   const [savingsCurrent, setSavingsCurrent] = useState('');
+  const [editingGoal, setEditingGoal] = useState(null);
 
   const transactions = state.transactions || [];
   const savingsGoals = state.savingsGoals || [];
@@ -194,18 +195,58 @@ export default function MoneyPage() {
     dispatch({ type: 'DELETE_TRANSACTION', payload: id });
   }
 
+  function openCreateGoal() {
+    setEditingGoal(null);
+    setSavingsName('');
+    setSavingsTarget('');
+    setSavingsCurrent('');
+    setShowSavingsForm(true);
+  }
+
+  function openEditGoal(g) {
+    setEditingGoal(g);
+    setSavingsName(g.name || '');
+    setSavingsTarget(String(g.target || ''));
+    setSavingsCurrent(String(g.current || 0));
+    setShowSavingsForm(true);
+  }
+
+  function deleteGoal(id) {
+    if (window.confirm('Are you sure you want to delete this savings goal?')) {
+      dispatch({ type: 'DELETE_SAVINGS_GOAL', payload: id });
+    }
+  }
+
   function saveSavingsGoal() {
     if (!savingsName.trim() || !savingsTarget) return;
-    dispatch({
-      type: 'ADD_SAVINGS_GOAL',
-      payload: {
-        id: generateId(),
-        name: savingsName.trim(),
-        target: parseFloat(savingsTarget),
-        current: parseFloat(savingsCurrent) || 0,
-        createdAt: new Date().toISOString(),
-      },
-    });
+    const targetVal = parseFloat(savingsTarget) || 0;
+    const currentVal = parseFloat(savingsCurrent) || 0;
+
+    if (editingGoal) {
+      dispatch({
+        type: 'UPDATE_SAVINGS_GOAL',
+        payload: {
+          ...editingGoal,
+          name: savingsName.trim(),
+          target: targetVal,
+          current: currentVal,
+          updatedAt: new Date().toISOString(),
+        },
+      });
+    } else {
+      dispatch({
+        type: 'ADD_SAVINGS_GOAL',
+        payload: {
+          id: generateId(),
+          name: savingsName.trim(),
+          target: targetVal,
+          current: currentVal,
+          createdAt: new Date().toISOString(),
+        },
+      });
+    }
+
+    setEditingGoal(null);
     setSavingsName('');
     setSavingsTarget('');
     setSavingsCurrent('');
@@ -497,7 +538,7 @@ export default function MoneyPage() {
 
       {tab === 'savings' && (
         <div className="space-y-4">
-          <Button size="sm" onClick={() => setShowSavingsForm(true)}>
+          <Button size="sm" onClick={openCreateGoal}>
             <Plus size={14} /> New Savings Goal
           </Button>
 
@@ -507,7 +548,7 @@ export default function MoneyPage() {
               title="No savings goals established"
               description="Define a target for your emergency fund, investment bucket, or major personal milestone."
               action={
-                <Button size="sm" onClick={() => setShowSavingsForm(true)}>
+                <Button size="sm" onClick={openCreateGoal}>
                   <Plus size={14} /> Create Goal
                 </Button>
               }
@@ -524,9 +565,25 @@ export default function MoneyPage() {
                       <p className="font-bold text-sm sm:text-base text-[var(--color-text-primary)]">
                         {g.name}
                       </p>
-                      <Badge color={pct >= 100 ? '#22c55e' : 'var(--color-accent)'}>
-                        {pct}% Funded
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge color={pct >= 100 ? '#22c55e' : 'var(--color-accent)'}>
+                          {pct}% Funded
+                        </Badge>
+                        <button
+                          onClick={() => openEditGoal(g)}
+                          className="p-1 rounded-lg text-[var(--color-text-secondary)] hover:text-white hover:bg-white/[0.06] transition-colors"
+                          aria-label={`Edit ${g.name}`}
+                        >
+                          <Edit3 size={14} />
+                        </button>
+                        <button
+                          onClick={() => deleteGoal(g.id)}
+                          className="p-1 rounded-lg text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
+                          aria-label={`Delete ${g.name}`}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </div>
                     <div className="h-2.5 bg-white/[0.08] rounded-full overflow-hidden mb-3 shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)]">
                       <div
@@ -649,15 +706,19 @@ export default function MoneyPage() {
       {/* Savings Goal Modal */}
       <Modal
         isOpen={showSavingsForm}
-        onClose={() => setShowSavingsForm(false)}
-        title="New Savings Milestone"
+        onClose={() => {
+          setShowSavingsForm(false);
+          setEditingGoal(null);
+        }}
+        title={editingGoal ? 'Edit Savings Milestone' : 'New Savings Milestone'}
       >
         <div className="space-y-4">
           <div>
-            <label className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">
+            <label htmlFor="savings-goal-name" className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">
               Goal Name
             </label>
             <input
+              id="savings-goal-name"
               value={savingsName}
               onChange={(e) => setSavingsName(e.target.value)}
               placeholder="e.g., 6-Month Emergency Runway"
@@ -665,10 +726,11 @@ export default function MoneyPage() {
             />
           </div>
           <div>
-            <label className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">
+            <label htmlFor="savings-goal-target" className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">
               Target Amount ($)
             </label>
             <input
+              id="savings-goal-target"
               type="number"
               value={savingsTarget}
               onChange={(e) => setSavingsTarget(e.target.value)}
@@ -677,10 +739,11 @@ export default function MoneyPage() {
             />
           </div>
           <div>
-            <label className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">
-              Initial Capital Deposited ($)
+            <label htmlFor="savings-goal-current" className="text-xs font-bold text-[var(--color-text-secondary)] mb-1 block">
+              Current Capital Deposited ($)
             </label>
             <input
+              id="savings-goal-current"
               type="number"
               value={savingsCurrent}
               onChange={(e) => setSavingsCurrent(e.target.value)}
@@ -693,7 +756,7 @@ export default function MoneyPage() {
             disabled={!savingsName.trim() || !savingsTarget}
             className="w-full"
           >
-            Create Savings Milestone
+            {editingGoal ? 'Update Savings Milestone' : 'Create Savings Milestone'}
           </Button>
         </div>
       </Modal>

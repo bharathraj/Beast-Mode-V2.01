@@ -246,17 +246,32 @@ export async function signOutUser() {
 
 export async function updatePrivacyPreferences(shareProgress) {
   const user = await getCurrentUser();
-  if (!user) return false;
+  const shouldShare = Boolean(shareProgress);
 
   if (isSupabaseConfigured && supabase) {
-    const { error } = await supabase.auth.updateUser({
-      data: { share_progress: Boolean(shareProgress) },
-    });
-    if (error) throw error;
-  } else {
-    user.user_metadata = { ...user.user_metadata, share_progress: Boolean(shareProgress) };
+    if (user) {
+      const { error } = await supabase.auth.updateUser({
+        data: { share_progress: shouldShare },
+      });
+      if (error) throw error;
+
+      await supabase
+        .from('profiles')
+        .update({ share_progress: shouldShare })
+        .eq('id', user.id);
+    }
+  } else if (user) {
+    user.user_metadata = { ...user.user_metadata, share_progress: shouldShare };
     setLocalStore(LOCAL_USER_PROFILE_KEY, user);
   }
+
+  // If user opts out, remove their entry from public leaderboards immediately
+  if (!shouldShare) {
+    const list = getLocalStore(LOCAL_LEADERBOARD_KEY, []);
+    const filtered = list.filter(e => e.userId !== 'current_user' && (!user || e.userId !== user.id));
+    setLocalStore(LOCAL_LEADERBOARD_KEY, filtered);
+  }
+
   return true;
 }
 
@@ -271,19 +286,49 @@ export async function getFriendsList() {
 
     const { data, error } = await supabase
       .from('friendships')
-      .select('id, user_id, friend_id, status, created_at, friend:profiles!friend_id(id, name, avatar, share_progress)')
+      .select(`
+        id,
+        user_id,
+        friend_id,
+        status,
+        created_at,
+        initiator:profiles!user_id(id, name, avatar, email, share_progress),
+        recipient:profiles!friend_id(id, name, avatar, email, share_progress)
+      `)
       .or(`user_id.eq.${user.id},friend_id.eq.${user.id}`);
 
     if (error) {
       console.warn('Supabase friends query failed, using local store:', error);
       return getLocalStore(LOCAL_FRIENDS_KEY, []);
     }
-    return data || [];
+
+    // Resolve dual-party friendship ambiguity:
+    // If current user is user_id, friend is friend_id / recipient.
+    // If current user is friend_id, friend is user_id / initiator.
+    return (data || []).map(row => {
+      const isInitiator = row.user_id === user.id;
+      const otherProfile = isInitiator ? row.recipient : row.initiator;
+      const otherId = isInitiator ? row.friend_id : row.user_id;
+
+      return {
+        id: row.id,
+        userId: otherId,
+        friendId: otherId,
+        friendName: otherProfile?.name || 'Friend',
+        friendEmail: otherProfile?.email || '',
+        friendAvatar: otherProfile?.avatar || '👤',
+        shareProgress: Boolean(otherProfile?.share_progress),
+        status: row.status,
+        isInitiator,
+        joinedAt: row.created_at,
+      };
+    });
   }
 
   return getLocalStore(LOCAL_FRIENDS_KEY, [
     {
       id: 'f_01',
+      userId: 'u_beast_01',
       friendName: 'Arjun Verma',
       friendEmail: 'arjun@example.com',
       friendAvatar: '🦁',
@@ -292,6 +337,7 @@ export async function getFriendsList() {
     },
     {
       id: 'f_02',
+      userId: 'u_beast_04',
       friendName: 'Sneha Patel',
       friendEmail: 'sneha@example.com',
       friendAvatar: '🧘',
@@ -514,7 +560,149 @@ export async function joinGroupByCode(code) {
  * All scores are computed deterministically from verified habit & workout logs.
  * Users cannot submit arbitrary scores.
  */
-export async function getLeaderboardRankings(challengeMode = 'beast', scope = 'global') {
+export function sortAndRankLeaderboard(entries) {
+  return [...entries]
+    .sort((a, b) => {
+      if (b.consistencyPercent !== a.consistencyPercent) {
+        return b.consistencyPercent - a.consistencyPercent;
+      }
+      if (b.currentStreak !== a.currentStreak) {
+        return b.currentStreak - a.currentStreak;
+      }
+      return (b.workoutsCompleted || 0) - (a.workoutsCompleted || 0);
+    })
+    .map((entry, index) => ({
+      ...entry,
+      rank: index + 1,
+    }));
+}
+
+/**
+ * Deterministic Leaderboard Rankings:
+ * - Scope 'global': returns all opted-in participants.
+ * - Scope 'friends': returns ONLY accepted friends and the current user.
+ *   Pending and declined requests are strictly excluded.
+ */
+export async function getLeaderboardRankings(challengeMode = 'beast', scope = 'global', currentUserId = 'current_user') {
+  let user = null;
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      user = authUser;
+    } catch {
+      // ignore
+    }
+  } else {
+    user = getLocalStore(LOCAL_USER_PROFILE_KEY, null);
+  }
+  const effectiveUserId = user?.id || currentUserId || 'current_user';
+
+  // 1. Supabase Cloud Database Query (if configured)
+  if (isSupabaseConfigured && supabase) {
+    try {
+      if (scope === 'friends') {
+        // Attempt secure server-side RPC first (user derived from auth.uid())
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('get_friends_leaderboard', {
+          p_mode: challengeMode,
+        });
+
+        if (!rpcErr && Array.isArray(rpcData) && rpcData.length > 0) {
+          return rpcData.map(r => ({
+            userId: r.user_id,
+            name: r.name || (r.user_id === effectiveUserId ? 'You' : 'Anonymous'),
+            avatar: r.avatar || '⚡',
+            mode: challengeMode,
+            consistencyPercent: Number(r.consistency_percent) || 0,
+            currentStreak: Number(r.current_streak) || 0,
+            workoutsCompleted: Number(r.workouts_completed) || 0,
+            challengeDay: Number(r.challenge_day) || 1,
+            rank: Number(r.rank) || 1,
+          }));
+        }
+
+        // Fallback to table query if RPC is not deployed yet
+        const friendsList = await getFriendsList();
+        // Strictly filter to accepted friends only
+        const acceptedFriends = friendsList.filter(f => f.status === 'accepted');
+        const allowedIds = new Set([effectiveUserId, ...acceptedFriends.map(f => f.userId || f.friendId)]);
+
+        const { data, error } = await supabase
+          .from('challenges')
+          .select(`
+            id,
+            user_id,
+            mode,
+            consistency_rate,
+            current_streak,
+            workouts_completed,
+            start_date,
+            profile:profiles!user_id(id, name, avatar, share_progress)
+          `)
+          .eq('status', 'active')
+          .eq('mode', challengeMode);
+
+        if (!error && data) {
+          const filtered = data
+            .filter(c => {
+              const isSelf = c.user_id === effectiveUserId;
+              const isAcceptedFriend = allowedIds.has(c.user_id);
+              return isSelf || (isAcceptedFriend && c.profile?.share_progress);
+            })
+            .map(c => ({
+              userId: c.user_id,
+              name: c.profile?.name || (c.user_id === effectiveUserId ? 'You' : 'Anonymous'),
+              avatar: c.profile?.avatar || '⚡',
+              mode: c.mode,
+              consistencyPercent: Math.min(100, Math.max(0, Math.round(Number(c.consistency_rate) || 0))),
+              currentStreak: Math.max(0, Math.floor(Number(c.current_streak) || 0)),
+              workoutsCompleted: Math.max(0, Math.floor(Number(c.workouts_completed) || 0)),
+              challengeDay: Math.max(1, Math.floor((new Date() - new Date(c.start_date)) / (1000 * 60 * 60 * 24)) + 1),
+              shareProgress: Boolean(c.profile?.share_progress),
+            }));
+
+          return sortAndRankLeaderboard(filtered);
+        }
+      } else {
+        // Global scope
+        const { data, error } = await supabase
+          .from('challenges')
+          .select(`
+            id,
+            user_id,
+            mode,
+            consistency_rate,
+            current_streak,
+            workouts_completed,
+            start_date,
+            profile:profiles!user_id(id, name, avatar, share_progress)
+          `)
+          .eq('status', 'active')
+          .eq('mode', challengeMode);
+
+        if (!error && data) {
+          const filtered = data
+            .filter(c => c.user_id === effectiveUserId || c.profile?.share_progress)
+            .map(c => ({
+              userId: c.user_id,
+              name: c.profile?.name || (c.user_id === effectiveUserId ? 'You' : 'Anonymous'),
+              avatar: c.profile?.avatar || '⚡',
+              mode: c.mode,
+              consistencyPercent: Math.min(100, Math.max(0, Math.round(Number(c.consistency_rate) || 0))),
+              currentStreak: Math.max(0, Math.floor(Number(c.current_streak) || 0)),
+              workoutsCompleted: Math.max(0, Math.floor(Number(c.workouts_completed) || 0)),
+              challengeDay: Math.max(1, Math.floor((new Date() - new Date(c.start_date)) / (1000 * 60 * 60 * 24)) + 1),
+              shareProgress: Boolean(c.profile?.share_progress),
+            }));
+
+          return sortAndRankLeaderboard(filtered);
+        }
+      }
+    } catch (err) {
+      console.warn('Supabase leaderboard fetch failed, falling back to local store:', err);
+    }
+  }
+
+  // 2. Local Demo Fallback Store
   let leaderboard = getLocalStore(LOCAL_LEADERBOARD_KEY, []);
 
   // Filter by challenge mode
@@ -522,38 +710,67 @@ export async function getLeaderboardRankings(challengeMode = 'beast', scope = 'g
     leaderboard = leaderboard.filter(e => e.mode === challengeMode);
   }
 
-  // If user has local state, incorporate user's current verified stats
-  return leaderboard.sort((a, b) => {
-    if (b.consistencyPercent !== a.consistencyPercent) {
-      return b.consistencyPercent - a.consistencyPercent;
-    }
-    if (b.currentStreak !== a.currentStreak) {
-      return b.currentStreak - a.currentStreak;
-    }
-    return (b.workoutsCompleted || 0) - (a.workoutsCompleted || 0);
-  }).map((entry, index) => ({
-    ...entry,
-    rank: index + 1,
-  }));
+  // Handle Friends Only vs Global scope
+  if (scope === 'friends') {
+    const friendsList = await getFriendsList();
+    // Strictly filter to accepted friends only - ignore pending, declined, or rejected
+    const acceptedFriends = friendsList.filter(f => f.status === 'accepted');
+    const acceptedIdentifiers = new Set(
+      acceptedFriends.flatMap(f => [f.userId, f.friendId, f.friendName, f.friendEmail].filter(Boolean))
+    );
+
+    leaderboard = leaderboard.filter(entry => {
+      // The current user always appears on their friends leaderboard
+      if (entry.userId === 'current_user' || entry.userId === effectiveUserId) {
+        return true;
+      }
+      // Friend entries must match accepted friends
+      return acceptedIdentifiers.has(entry.userId) || acceptedIdentifiers.has(entry.name);
+    });
+  }
+
+  return sortAndRankLeaderboard(leaderboard);
 }
 
 /**
  * Synchronizes user's current verified challenge stats to Supabase / Local leaderboard.
  * Only syncs if user has opted in (share_progress: true).
+ * Validates and clamps all metrics to prevent arbitrary score manipulation.
  * Private food logs and body measurements are NEVER shared or synchronized.
  */
 export async function syncUserChallengeStats(challenge, verifiedStats, userName, shareProgress = false) {
-  if (!shareProgress || !challenge) return false;
+  if (!shareProgress || !challenge || typeof verifiedStats !== 'object') return false;
+
+  // Validate and clamp input metrics
+  const rawConsistency = Number(verifiedStats.consistencyPercent);
+  const consistencyPercent = Number.isFinite(rawConsistency)
+    ? Math.min(100, Math.max(0, Math.round(rawConsistency)))
+    : 0;
+
+  const rawStreak = Number(verifiedStats.currentStreak);
+  const currentStreak = Number.isFinite(rawStreak)
+    ? Math.max(0, Math.floor(rawStreak))
+    : 0;
+
+  const rawWorkouts = Number(verifiedStats.workoutsCompleted);
+  const workoutsCompleted = Number.isFinite(rawWorkouts)
+    ? Math.max(0, Math.floor(rawWorkouts))
+    : 0;
+
+  const rawDay = Number(verifiedStats.challengeDay);
+  const challengeDay = Number.isFinite(rawDay)
+    ? Math.max(1, Math.floor(rawDay))
+    : 1;
 
   const entry = {
     userId: 'current_user',
     name: userName || 'You',
     avatar: '⚡',
     mode: challenge.mode || 'beast',
-    consistencyPercent: Math.min(100, Math.max(0, verifiedStats.consistencyPercent || 0)),
-    currentStreak: verifiedStats.currentStreak || 0,
-    workoutsCompleted: verifiedStats.workoutsCompleted || 0,
-    challengeDay: verifiedStats.challengeDay || 1,
+    consistencyPercent,
+    currentStreak,
+    workoutsCompleted,
+    challengeDay,
     shareProgress: true,
     lastSyncedAt: new Date().toISOString(),
   };
