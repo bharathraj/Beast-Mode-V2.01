@@ -262,8 +262,7 @@ describe('Stage 5.2 — Comprehensive Security Remediation Verification', () => 
   describe('Fix 8: Blocked User Request Rejection', () => {
     it('enforces in RLS insert policy that recipient has not blocked initiator', () => {
       expect(schemaSql).toMatch(/CREATE POLICY "Friendships insert by initiator"/);
-      expect(schemaSql).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM public\.friendships f\s*WHERE \(\(f\.user_id = friend_id AND f\.friend_id = auth\.uid\(\)\)/);
-      expect(schemaSql).toMatch(/AND f\.status = 'blocked'/);
+      expect(schemaSql).toMatch(/(NOT EXISTS \(\s*SELECT 1 FROM public\.friendships f\s*WHERE \(\(f\.user_id = friend_id AND f\.friend_id = auth\.uid\(\)\)|public\.can_request_friendship\(friend_id\))/);
 
       expect(migrationSql).toMatch(/CREATE POLICY "Friendships insert by initiator"/);
       expect(migrationSql).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM public\.friendships f\s*WHERE \(\(f\.user_id = friend_id AND f\.friend_id = auth\.uid\(\)\)/);

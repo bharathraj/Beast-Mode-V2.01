@@ -13,6 +13,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { generateId, todayStr } from '../utils/storage';
+import { calculateChallengeScores } from '../utils/challenge';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -733,31 +734,80 @@ export async function getLeaderboardRankings(challengeMode = 'beast', scope = 'g
 }
 
 /**
+ * Safely parses and sanitizes habit schedule data.
+ * Malformed JSON string values fallback safely to 'daily' without throwing or aborting.
+ */
+export function sanitizeHabitSchedule(schedule) {
+  if (schedule === null || schedule === undefined) return 'daily';
+  if (Array.isArray(schedule)) {
+    return schedule.filter(item => typeof item === 'string' && item.trim().length > 0);
+  }
+  if (typeof schedule === 'object') {
+    return schedule;
+  }
+  if (typeof schedule === 'string') {
+    const trimmed = schedule.trim();
+    if (trimmed === 'daily' || trimmed === '"daily"' || trimmed === '') return 'daily';
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        // Malformed JSON must not abort the entire synchronization; fallback safely to 'daily'
+        return 'daily';
+      }
+    }
+    return trimmed;
+  }
+  return 'daily';
+}
+
+/**
  * Synchronizes user's current verified challenge stats to Supabase / Local leaderboard.
  * Only syncs if user has opted in (share_progress: true).
  * Validates and clamps all metrics to prevent arbitrary score manipulation.
+ * Prerequisite writes (habits, completions, workouts) must succeed before challenge record is synchronized.
  * Private food logs and body measurements are NEVER shared or synchronized.
  */
-export async function syncUserChallengeStats(challenge, verifiedStats, userName, shareProgress = false) {
+export async function syncUserChallengeStats(challenge, verifiedStats, userName, shareProgress = false, options = {}) {
   if (!shareProgress || !challenge || typeof verifiedStats !== 'object') return false;
 
+  // Independently recalculate / validate metrics from the user-owned records rather than blindly trusting frontend verifiedStats
+  let validatedStats = verifiedStats;
+  if (Array.isArray(options.habits) || Array.isArray(options.habitCompletions) || Array.isArray(options.workoutSessions)) {
+    // Isolate completions strictly to this challenge (do not include records with missing or NULL challengeId)
+    const challengeCompletions = (options.habitCompletions || []).filter(
+      c => c && typeof c.challengeId === 'string' && c.challengeId.trim() !== '' && c.challengeId === challenge.id
+    );
+    validatedStats = calculateChallengeScores(
+      challenge,
+      options.habits || [],
+      challengeCompletions,
+      options.workoutSessions || []
+    );
+  }
+
   // Validate and clamp input metrics
-  const rawConsistency = Number(verifiedStats.consistencyPercent);
+  const rawConsistency = Number(validatedStats.consistencyPercent);
   const consistencyPercent = Number.isFinite(rawConsistency)
     ? Math.min(100, Math.max(0, Math.round(rawConsistency)))
     : 0;
 
-  const rawStreak = Number(verifiedStats.currentStreak);
+  const rawStreak = Number(validatedStats.currentStreak);
   const currentStreak = Number.isFinite(rawStreak)
     ? Math.max(0, Math.floor(rawStreak))
     : 0;
 
-  const rawWorkouts = Number(verifiedStats.workoutsCompleted);
+  const rawLongestStreak = Number(validatedStats.longestStreak);
+  const longestStreak = Number.isFinite(rawLongestStreak)
+    ? Math.max(0, Math.floor(rawLongestStreak))
+    : currentStreak;
+
+  const rawWorkouts = Number(validatedStats.workoutsCompleted);
   const workoutsCompleted = Number.isFinite(rawWorkouts)
     ? Math.max(0, Math.floor(rawWorkouts))
     : 0;
 
-  const rawDay = Number(verifiedStats.challengeDay);
+  const rawDay = Number(validatedStats.challengeDay);
   const challengeDay = Number.isFinite(rawDay)
     ? Math.max(1, Math.floor(rawDay))
     : 1;
@@ -769,41 +819,157 @@ export async function syncUserChallengeStats(challenge, verifiedStats, userName,
     mode: challenge.mode || 'beast',
     consistencyPercent,
     currentStreak,
+    longestStreak,
     workoutsCompleted,
     challengeDay,
     shareProgress: true,
     lastSyncedAt: new Date().toISOString(),
   };
 
-  const list = getLocalStore(LOCAL_LEADERBOARD_KEY, []);
-  const filtered = list.filter(e => e.userId !== 'current_user');
-  filtered.push(entry);
-  setLocalStore(LOCAL_LEADERBOARD_KEY, filtered);
+  if (validatedStats.activityStreak !== undefined && validatedStats.activityStreak !== null) {
+    entry.activityStreak = Number(validatedStats.activityStreak) || 0;
+  }
 
+  // When Supabase is configured, synchronize with backend database
   if (isSupabaseConfigured && supabase) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         entry.userId = user.id;
-        await supabase
-          .from('challenges')
-          .upsert({
-            id: challenge.id,
-            user_id: user.id,
-            mode: challenge.mode,
-            name: challenge.name,
-            start_date: challenge.startDate,
-            end_date: challenge.endDate,
-            consistency_rate: entry.consistencyPercent,
-            current_streak: entry.currentStreak,
-            workouts_completed: entry.workoutsCompleted,
-            updated_at: new Date().toISOString(),
-          });
+
+        const selectedHabitIds = Array.isArray(challenge.selectedHabitIds) ? challenge.selectedHabitIds : [];
+        const selectedHabitSet = new Set(selectedHabitIds);
+
+        // 1. Synchronize only habits selected by the active challenge (or unarchived habits if no selection specified)
+        if (Array.isArray(options.habits) && options.habits.length > 0) {
+          const habitsToSync = options.habits
+            .filter(h => h && h.id && (selectedHabitSet.size > 0 ? selectedHabitSet.has(h.id) : !h.archived))
+            .map(h => ({
+              id: h.id,
+              user_id: user.id,
+              name: h.name || 'Habit',
+              category: h.category || 'discipline',
+              schedule: sanitizeHabitSchedule(h.schedule),
+              archived: Boolean(h.archived),
+              updated_at: new Date().toISOString(),
+            }));
+
+          if (habitsToSync.length > 0) {
+            const { error: habitErr } = await supabase.from('habits').upsert(habitsToSync, { onConflict: 'id' });
+            if (habitErr) {
+              console.error('Habit synchronization error:', habitErr.message);
+              throw new Error(`Prerequisite write failed: Habit synchronization encountered an error (${habitErr.message})`);
+            }
+          }
+        }
+
+        // 2. Synchronize habit completions (isolated strictly to active challenge and participating habits; no NULL/missing challengeId)
+        if (Array.isArray(options.habitCompletions) && options.habitCompletions.length > 0) {
+          const completionsToSync = options.habitCompletions
+            .filter(c =>
+              c &&
+              typeof c.challengeId === 'string' &&
+              c.challengeId === challenge.id &&
+              (selectedHabitSet.size > 0 ? selectedHabitSet.has(c.habitId) : true) &&
+              c.date >= challenge.startDate &&
+              c.date <= todayStr()
+            )
+            .map(c => ({
+              id: c.id,
+              user_id: user.id,
+              challenge_id: challenge.id,
+              habit_id: c.habitId,
+              date: c.date,
+              completed_at: c.completedAt || new Date().toISOString(),
+            }));
+
+          if (completionsToSync.length > 0) {
+            const { error: compErr } = await supabase.from('habit_completions').upsert(completionsToSync, { onConflict: 'id' });
+            if (compErr) {
+              console.error('Habit completions synchronization error:', compErr.message);
+              throw new Error(`Prerequisite write failed: Habit completion synchronization encountered an error (${compErr.message})`);
+            }
+          }
+        }
+
+        // 3. Synchronize completed workout sessions
+        if (Array.isArray(options.workoutSessions) && options.workoutSessions.length > 0) {
+          const workoutsToSync = options.workoutSessions
+            .filter(w =>
+              w &&
+              w.status === 'completed' &&
+              w.date >= challenge.startDate &&
+              w.date <= todayStr()
+            )
+            .map(w => ({
+              id: w.id,
+              user_id: user.id,
+              name: w.name || 'Workout',
+              date: w.date,
+              start_time: w.startTime || null,
+              end_time: w.endTime || null,
+              volume: Number(w.volume) || 0,
+              exercises: Array.isArray(w.exercises) ? w.exercises : [],
+              status: 'completed',
+            }));
+
+          if (workoutsToSync.length > 0) {
+            const { error: workoutErr } = await supabase.from('workout_sessions').upsert(workoutsToSync, { onConflict: 'id' });
+            if (workoutErr) {
+              console.error('Workout sessions synchronization error:', workoutErr.message);
+              throw new Error(`Prerequisite write failed: Workout synchronization encountered an error (${workoutErr.message})`);
+            }
+          }
+        }
+
+        // 4. Prerequisite writes succeeded -> Synchronize Challenge record
+        const challengeRecord = {
+          id: challenge.id,
+          user_id: user.id,
+          mode: challenge.mode,
+          name: challenge.name,
+          start_date: challenge.startDate,
+          end_date: challenge.endDate,
+          selected_habit_ids: selectedHabitIds,
+          consistency_rate: entry.consistencyPercent,
+          current_streak: entry.currentStreak,
+          longest_streak: entry.longestStreak,
+          workouts_completed: entry.workoutsCompleted,
+          updated_at: new Date().toISOString(),
+        };
+
+        if (entry.activityStreak !== undefined && entry.activityStreak !== null) {
+          challengeRecord.activity_streak = entry.activityStreak;
+        }
+
+        const { error: upsertErr } = await supabase.from('challenges').upsert(challengeRecord);
+        if (upsertErr) {
+          if (upsertErr.message?.includes('activity_streak') || upsertErr.code === '42703') {
+            // Backward compatibility fallback when database is rolled back to Stage 5.2.1
+            delete challengeRecord.activity_streak;
+            const { error: fallbackErr } = await supabase.from('challenges').upsert(challengeRecord);
+            if (fallbackErr) {
+              console.error('Challenge upsert fallback error:', fallbackErr.message);
+              throw new Error(`Challenge synchronization failed: ${fallbackErr.message}`);
+            }
+          } else {
+            console.error('Challenge upsert error:', upsertErr.message);
+            throw new Error(`Challenge synchronization failed: ${upsertErr.message}`);
+          }
+        }
       }
     } catch (err) {
-      console.warn('Background Supabase leaderboard sync error:', err);
+      console.warn('Supabase leaderboard synchronization error:', err?.message || err);
+      // Prerequisite write or challenge write failed: do NOT present as successfully synchronized
+      throw err;
     }
   }
+
+  // All prerequisite writes and challenge sync succeeded (or offline mock mode active): update local leaderboard
+  const list = getLocalStore(LOCAL_LEADERBOARD_KEY, []);
+  const filtered = list.filter(e => e.userId !== 'current_user');
+  filtered.push(entry);
+  setLocalStore(LOCAL_LEADERBOARD_KEY, filtered);
 
   return true;
 }

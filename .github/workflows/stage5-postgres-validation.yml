@@ -1,0 +1,175 @@
+name: PostgreSQL Staging Migration & RLS Verification
+
+on:
+  push:
+    branches:
+      - stage-5-2-review
+  pull_request:
+    branches:
+      - stage-5-2-review
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: postgres-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-postgresql:
+    name: PostgreSQL 15 & Supabase RLS Validation
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_DB: beastmode_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgrespassword
+      PGDATABASE: beastmode_test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL Client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+
+      - name: Verify PostgreSQL Connection & Engine Version
+        run: |
+          echo "========================================================================"
+          echo ">>> PostgreSQL Engine Diagnostics & System Information"
+          echo "========================================================================"
+          psql -c "SELECT version();"
+          psql -c "SHOW server_version;"
+          psql -c "SHOW server_encoding;"
+          psql -c "SHOW timezone;"
+
+      - name: Initialize Supabase Compatibility Layer
+        run: |
+          echo "========================================================================"
+          echo ">>> Initializing Supabase Mock Environment & Auth Primitives"
+          echo "========================================================================"
+          psql -v ON_ERROR_STOP=1 -f supabase/tests/ci_init_supabase_compat.sql
+          psql -c "SELECT rolname FROM pg_roles WHERE rolname IN ('anon', 'authenticated', 'service_role', 'supabase_admin');"
+
+      - name: Apply Genuine Pre-Stage-5.2.2 Baseline Schema
+        run: |
+          echo "========================================================================"
+          echo ">>> Applying Genuine Pre-Stage-5.2.2 Baseline (Stage 5.2.1 State)"
+          echo "========================================================================"
+          psql -v ON_ERROR_STOP=1 -f supabase/tests/pre_stage5_2_2_baseline.sql
+
+      - name: Apply Stage 5.2.2 Forward Migration
+        run: |
+          echo "========================================================================"
+          echo ">>> Applying Forward Migration (20261101_stage5_2_2_final_security_corrections.sql)"
+          echo "========================================================================"
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261101_stage5_2_2_final_security_corrections.sql
+
+      - name: Verify Post-Migration Schema State
+        run: |
+          echo "========================================================================"
+          echo ">>> Verifying Forward Migration Schema State"
+          echo "========================================================================"
+          psql -v ON_ERROR_STOP=1 <<'EOF'
+            DO $$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'challenges' AND column_name = 'activity_streak'
+              ) THEN
+                RAISE EXCEPTION 'Verification failure: activity_streak column missing on challenges table!';
+              END IF;
+
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_proc WHERE proname = 'is_habit_scheduled'
+              ) THEN
+                RAISE EXCEPTION 'Verification failure: is_habit_scheduled function missing in pg_proc!';
+              END IF;
+
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_indexes
+                WHERE schemaname = 'public' AND indexname = 'uq_friendships_mutual_pair'
+              ) THEN
+                RAISE EXCEPTION 'Verification failure: uq_friendships_mutual_pair index missing!';
+              END IF;
+
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'uq_friendships_dedup_backup_id'
+              ) THEN
+                RAISE EXCEPTION 'Verification failure: uq_friendships_dedup_backup_id constraint missing on _friendships_dedup_backup!';
+              END IF;
+
+              RAISE NOTICE '✓ Post-migration schema state successfully verified.';
+            END $$;
+EOF
+
+      - name: Execute Staging Verification & RLS Test Suite
+        run: |
+          echo "========================================================================"
+          echo ">>> Executing Staging Verification Test Suite (stage5_2_2_staging_verification.sql)"
+          echo "========================================================================"
+          psql -v ON_ERROR_STOP=1 -f supabase/tests/stage5_2_2_staging_verification.sql
+
+      - name: Execute Stage 5.2.2 Rollback Migration
+        run: |
+          echo "========================================================================"
+          echo ">>> Executing Rollback Migration (20261101_stage5_2_2_final_security_corrections_rollback.sql)"
+          echo "========================================================================"
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261101_stage5_2_2_final_security_corrections_rollback.sql
+
+      - name: Verify Schema & Data Restoration Post-Rollback
+        run: |
+          echo "========================================================================"
+          echo ">>> Verifying Post-Rollback Schema State & Audit Retention"
+          echo "========================================================================"
+          psql -v ON_ERROR_STOP=1 <<'EOF'
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1 FROM pg_indexes
+                WHERE schemaname = 'public' AND indexname = 'uq_friendships_mutual_pair'
+              ) THEN
+                RAISE EXCEPTION 'Restoration failure: uq_friendships_mutual_pair index still exists post-rollback!';
+              END IF;
+
+              IF EXISTS (
+                SELECT 1 FROM pg_proc
+                WHERE proname = 'is_habit_scheduled'
+              ) THEN
+                RAISE EXCEPTION 'Restoration failure: is_habit_scheduled function still exists post-rollback!';
+              END IF;
+
+              IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'challenges' AND column_name = 'activity_streak'
+              ) THEN
+                RAISE EXCEPTION 'Restoration failure: activity_streak column still exists on challenges post-rollback!';
+              END IF;
+
+              IF NOT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = '_friendships_dedup_backup'
+              ) THEN
+                RAISE EXCEPTION 'Restoration failure: _friendships_dedup_backup audit table was dropped during rollback!';
+              END IF;
+
+              RAISE NOTICE '✓ Rollback restoration verification passed: schema cleaned and audit data preserved.';
+            END $$;
+EOF

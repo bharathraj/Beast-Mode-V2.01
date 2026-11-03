@@ -180,7 +180,7 @@ describe('Stage 5 — Security Remediation & Performance Verification', () => {
     });
 
     it('enforces safe explicit search_path and restricts EXECUTE privileges', () => {
-      expect(schemaSql).toMatch(/SET search_path = public, auth/);
+      expect(schemaSql).toMatch(/SET search_path = (pg_catalog, public, auth|public, auth)/);
       expect(schemaSql).toMatch(/REVOKE ALL ON FUNCTION public\.get_friends_leaderboard\(TEXT\) FROM anon/);
       expect(schemaSql).toMatch(/GRANT EXECUTE ON FUNCTION public\.get_friends_leaderboard\(TEXT\) TO authenticated/);
     });

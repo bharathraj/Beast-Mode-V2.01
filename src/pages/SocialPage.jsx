@@ -17,7 +17,7 @@ import {
   getLeaderboardRankings,
   syncUserChallengeStats,
 } from '../services/supabase';
-import { getChallengeProgress, getStreak, CHALLENGE_MODES } from '../utils/challenge';
+import { getChallengeProgress, getStreak, CHALLENGE_MODES, calculateChallengeScores } from '../utils/challenge';
 import { todayStr } from '../utils/storage';
 import {
   Users, Trophy, Shield, UserPlus, LogIn, LogOut,
@@ -69,41 +69,21 @@ export default function SocialPage() {
 
   const verifiedStats = useMemo(() => {
     if (!activeChallenge) {
-      return { consistencyPercent: 0, currentStreak: 0, workoutsCompleted: 0, challengeDay: 0 };
+      return { consistencyPercent: 0, currentStreak: 0, longestStreak: 0, workoutsCompleted: 0, challengeDay: 0 };
     }
 
-    const progress = getChallengeProgress(activeChallenge);
-    const scheduledHabits = state.habits.filter(h => !h.archived);
-
-    // Calculate verified completions bounded by start and end date
-    const start = activeChallenge.startDate;
-    const today = todayStr();
-    const end = activeChallenge.endDate && activeChallenge.endDate < today ? activeChallenge.endDate : today;
+    // Isolate challenge completions strictly to active challenge.
+    // Exclude records with missing, undefined, or NULL challengeId; preserve legacy records without deleting them.
     const relevantCompletions = (state.habitCompletions || []).filter(
-      c => (!c.challengeId || c.challengeId === activeChallenge.id) && c.date >= start && c.date <= end
+      c => c && typeof c.challengeId === 'string' && c.challengeId.trim() !== '' && c.challengeId === activeChallenge.id
     );
 
-    const activeDays = Math.max(1, progress.day);
-    const totalScheduledSlots = Math.max(1, scheduledHabits.length * activeDays);
-    const verifiedCompletions = relevantCompletions.length;
-    const consistency = Math.min(100, Math.round((verifiedCompletions / totalScheduledSlots) * 100));
-
-    // Calculate streak using challenge-bounded completions
-    let maxStreak = 0;
-    for (const h of scheduledHabits) {
-      const s = getStreak(h.id, relevantCompletions, end);
-      if (s.current > maxStreak) maxStreak = s.current;
-    }
-
-    // Workouts completed during active challenge bounded by start and end
-    const workouts = (state.workoutSessions || []).filter(w => w.date >= start && w.date <= end).length;
-
-    return {
-      consistencyPercent: consistency,
-      currentStreak: maxStreak,
-      workoutsCompleted: workouts,
-      challengeDay: progress.day,
-    };
+    return calculateChallengeScores(
+      activeChallenge,
+      state.habits,
+      relevantCompletions,
+      state.workoutSessions
+    );
   }, [activeChallenge, state.habits, state.habitCompletions, state.workoutSessions]);
 
   // Load auth user
@@ -159,18 +139,30 @@ export default function SocialPage() {
         return;
       }
 
-      await syncUserChallengeStats(
+      const syncSuccess = await syncUserChallengeStats(
         activeChallenge,
         verifiedStats,
         state.profile.name || user?.user_metadata?.name || 'You',
-        isOptedIn
+        isOptedIn,
+        {
+          habits: state.habits,
+          habitCompletions: state.habitCompletions,
+          workoutSessions: state.workoutSessions,
+        }
       );
+
+      if (!syncSuccess) {
+        setSyncMessage('Failed to synchronize challenge stats. Prerequisite data writes were not completed.');
+        return;
+      }
 
       const refreshed = await getLeaderboardRankings(leaderboardMode, leaderboardScope);
       setRankings(refreshed);
       setSyncMessage('Successfully synchronized your verified stats to leaderboard!');
     } catch (err) {
-      setSyncMessage(`Sync error: ${err.message}`);
+      // Do not expose private user data in error messages
+      const safeErrorMsg = err?.message?.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '[redacted]') || 'Synchronization failed.';
+      setSyncMessage(`Sync error: ${safeErrorMsg}`);
     } finally {
       setSyncingStats(false);
     }
@@ -219,8 +211,15 @@ export default function SocialPage() {
         activeChallenge,
         verifiedStats,
         state.profile.name || user?.user_metadata?.name || 'You',
-        true
-      );
+        true,
+        {
+          habits: state.habits,
+          habitCompletions: state.habitCompletions,
+          workoutSessions: state.workoutSessions,
+        }
+      ).catch(err => {
+        console.warn('Background sync on privacy toggle failed:', err?.message || err);
+      });
     }
   }
 
